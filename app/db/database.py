@@ -39,8 +39,6 @@ class Base(DeclarativeBase):
 #5.FastAPI数据库依赖
 # 每个请求获取自己的Session,请求结束后关闭Session
 # Session关闭≠整个Engine，连接由连接池管理
-class Session:
-    pass
 
 
 def get_db()->Generator[Session,None,None]:
@@ -55,5 +53,5 @@ def get_db()->Generator[Session,None,None]:
 def init_db()->None:
     """开发或临时测试时创还能不存在的数据表"""
     from app.db import models  # 确保模型已注册到 Base.metadata
-
+    # 创建数据库缺少的表，不会修改已有表增加列
     Base.metadata.create_all(bind=engine)

@@ -1,5 +1,7 @@
 
 from fastapi import FastAPI,Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from starlette.responses import JSONResponse
 
 from app.core.lifespan import lifespan
@@ -9,6 +11,7 @@ from app.db.message_api import message_router
 from app.exceptions.custom import LLMException
 from app.middleware.request_log import request_log_middleware
 from app.db.aftercare_api import router as aftercare_router
+from app.services.aftercare_extractor import AftercareExtractionError
 
 logger=setup_logger()
 
@@ -18,6 +21,16 @@ app=FastAPI(
     description="基于通义千问的ai后端接口",
     version="0.1.0",
     lifespan=lifespan  #生命周期
+)
+
+# React/Vite 本地开发服务跨域请求白名单。
+app.add_middleware(
+    CORSMiddleware,
+    # Vite 若默认端口被占用会自动改用 5174 等端口；开发环境允许本机端口。
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 # 注册路由
 app.include_router(chat_router)  #把子路由chat_router挂载到主app
@@ -34,12 +47,15 @@ def health():
 
 # 全局异常处理(统一)
 @app.exception_handler(LLMException)
-async def llm_exception_handler(request:Request,exc:LLMException):
+async def llm_exception_handler(
+        request:Request,
+        exc:LLMException):
     return JSONResponse(
         status_code=502,
         content={
             "code":exc.code,
             "message":exc.message,
+            "detail":exc.message,
             # request.state--在http请求处理过程中保存临时数据
             "trace_id":getattr(request.state,"trace_id",None),
         },
@@ -48,6 +64,59 @@ async def llm_exception_handler(request:Request,exc:LLMException):
             "X-Request-ID": getattr(request.state, "trace_id", ""),
         },
     )
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(
+        request:Request,
+        exc:RequestValidationError
+):
+    trace_id=getattr(request.state,"trace_id",None)
+    #不直接返回exc.errors(),因其中可含用户提交的原始input
+    #只保留前端展示和定位需要的字段
+    details=[
+        {
+            "loc":error.get("loc",[]),
+            "msg":error.get("msg","参数不合法"),
+            "type":error.get("type","validation_error")
+        }
+        for error in exc.errors()
+    ]
+
+    return JSONResponse(
+        status_code=422,
+        content={
+            "code":4001,
+            "message":"请求参数不正确，请检查字段格式",
+            "detail":details,
+            "trade_id":trace_id
+        },
+        headers={
+            "X-Trace-ID":trace_id or "",
+            "X-Request-ID":trace_id or ""
+        }
+    )
+
+@app.exception_handler(AftercareExtractionError)
+async def extraction_exception_handler(
+    request: Request,
+    exc: AftercareExtractionError,
+):
+    trace_id = getattr(request.state, "trace_id", None)
+
+    return JSONResponse(
+        status_code=502,
+        content={
+            "code": 5101,
+            "message": "AI 返回的信息格式不正确，请换一种说法后重试。",
+            "detail": str(exc),
+            "trace_id": trace_id,
+        },
+        headers={
+            "X-Trace-ID": trace_id or "",
+            "X-Request-ID": trace_id or "",
+        },
+    )
+
 
 # 注册Middleware
 app.middleware("http")(request_log_middleware)  # 所有接口自动记录

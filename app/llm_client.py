@@ -4,8 +4,11 @@ from typing import Iterator
 from openai import OpenAI
 
 from app.core.config import  settings
+from app.core.request_context import get_trace_id   #记录模型名称、耗时、输出规模、失败堆栈
 from app.exceptions.custom import LLMException
+import time
 
+logger=logging.getLogger(__name__)
 
 # 工程思想：配置与代码分离
 class LLMClient:
@@ -30,6 +33,8 @@ class LLMClient:
             else message
             for message in messages
         ]
+        trace_id=get_trace_id()
+        start_time=time.perf_counter()
 
         try:
             response=self.client.chat.completions.create(
@@ -43,11 +48,29 @@ class LLMClient:
                     code=5001,
                     message="模型返回了空回答"
                 )
+            duration_ms=(time.perf_counter()-start_time) *1000
+            logger.info(
+                "LLM调用完成 trace_id=%s model=%s input_message_count=%s "
+                "output_chars=%s duration_ms=%.2f",
+                trace_id,
+                self.model,
+                len(formatted_messages),
+                len(answer),
+                duration_ms,
+            )
+
             return answer.strip()
         except LLMException:
             raise
         except Exception as exc:
-            logging.exception("调用通义千问模型失败")
+            duration_ms=(time.perf_counter()-start_time)*1000
+
+            logger.exception(
+                "LLM 调用失败 trace_id=%s model=%s duration_ms=%.2f",
+                trace_id,
+                self.model,
+                duration_ms,
+            )
             raise LLMException(
                 code=5002,
                 message="模型服务调用失败，请稍后重试"
@@ -90,7 +113,7 @@ class LLMClient:
         except LLMException:
             raise
         except Exception as exc:
-            logging.exception("流式调用LLM失败")
+            logger.exception("流式调用LLM失败")
             raise LLMException(
                 code=5002,
                 message="模型调用失败，请稍后重试"

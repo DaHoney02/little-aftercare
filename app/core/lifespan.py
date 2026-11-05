@@ -4,15 +4,12 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.chat_service import ChatService
 
 
 @asynccontextmanager
 async def lifespan(app:FastAPI):
     # =====启动=======
     print("服务启动")
-
-
     yield
 
     #======关闭阶段=======

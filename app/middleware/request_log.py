@@ -4,6 +4,8 @@ import uuid
 
 from fastapi import Request
 
+from app.core.request_context import set_trace_id, reset_trace_id
+
 logger=logging.getLogger(__name__)
 
 
@@ -15,6 +17,7 @@ async def request_log_middleware(
     # 为本次请求生成唯一追踪ID
     trace_id=uuid.uuid4().hex
     request.state.trace_id=trace_id  #将ID存入当前请求的状态对象
+    trace_token=set_trace_id(trace_id)
 
     start_time=time.perf_counter()
     response=None
@@ -56,3 +59,6 @@ async def request_log_middleware(
             status_code,
             cost_ms
         )
+
+        # 请求结束时必须恢复ContextVar,因为后若有机会带着前一个请求的上下文运行，日志会串线
+        reset_trace_id(trace_token)
