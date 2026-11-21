@@ -49,7 +49,6 @@ def get_db()->Generator[Session,None,None]:
     finally:
         db.close()
 
-#6.
 def init_db()->None:
     """开发或临时测试时创还能不存在的数据表"""
     from app.db import models  # 确保模型已注册到 Base.metadata

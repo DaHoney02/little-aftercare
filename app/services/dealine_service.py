@@ -2,23 +2,24 @@ from datetime import date
 
 from sqlalchemy.orm import Session
 
-from app.db.aftercare_respository import list_upcoming_deadline, list_overdue_deadline
+from app.db.aftercare.aftercare_respository import list_upcoming_deadline, list_overdue_deadline
 from app.schemas.aftercare import DeadlineItem, OverdueDeadlineItem
 
 
 def get_upcoming_deadline_items(
         db:Session,
-        session_id:str,
+        user_id:int,
         days:int
 )->list[DeadlineItem]:
     """获取未来指定天数内到期的退货或保修事项"""
     today = date.today()
     records = list_upcoming_deadline(
         db=db,
-        session_id=session_id,
+        user_id=user_id,
         days=days
     )
     items = []
+    # 遍历每条记录，分别检查退货日期和保修日期
     for record in records:
         deadlines = [
             ("return", record.return_deadline),
@@ -31,6 +32,7 @@ def get_upcoming_deadline_items(
 
             days_remaining = (deadline - today).days
 
+            # 只保留今天及未来指定天数内到期的事项
             if 0 <= days_remaining <= days:
                 items.append(
                     DeadlineItem(
@@ -41,18 +43,19 @@ def get_upcoming_deadline_items(
                         days_remaining=days_remaining
                     )
                 )
+    #             按照截止日期从近到远排序
     items.sort(key=lambda item: item.deadline)
     return items
 
 def get_overdue_deadline_items(
         db:Session,
-        session_id:str,
+        user_id:int,
 )->list[OverdueDeadlineItem]:
-    """获取已过期的退货或保修事项"""
+    """获取当前用户已过期的退货或保修事项"""
     today=date.today()
     records=list_overdue_deadline(
         db=db,
-        session_id=session_id,
+        user_id=user_id,
     )
     items:list[OverdueDeadlineItem]=[]
 
@@ -62,7 +65,7 @@ def get_overdue_deadline_items(
             ("warranty", record.warranty_deadline),
         ]
         for deadline_type,deadline in deadlines:
-            if deadline is None or deadline >today:
+            if deadline is None or deadline >=today:
                 continue
 
             items.append(

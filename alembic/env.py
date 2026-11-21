@@ -17,7 +17,6 @@ if config.config_file_name is not None:
 # 告诉 Alembic：项目的数据表定义来自 Base.metadata
 target_metadata = Base.metadata
 
-
 def run_migrations_offline() -> None:
     """不建立实时连接，按数据库 URL 生成迁移 SQL。"""
     context.configure(

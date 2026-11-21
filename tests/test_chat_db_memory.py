@@ -6,7 +6,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.chat_service import ChatService
 from app.db.database import Base
-from app.db.message_repository import list_chat_messages
+from app.db.messages.message_repository import list_chat_messages
 from app.db.models import MessageRecord
 from app.schemas.schemas import Message
 

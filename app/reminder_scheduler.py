@@ -31,7 +31,7 @@ scheduler.add_job(
     run_reminder_job,  #需执行的函数
     trigger="cron",  #触发器类型 interval(固定间隔)、date（某个时间点执行一次）
     hour=9,  #执行时间
-    minutes=0,
+    minute=0,
     id="generate_daily_aftercare_reminders",  #任务唯一标识
     replace_existing=True,  #避免同时注册同一个任务
     max_instances=1,  #避免同一个任务重叠执行

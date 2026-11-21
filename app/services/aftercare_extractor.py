@@ -16,7 +16,6 @@ logger = logging.getLogger(__name__)
 class AftercareExtractionError(Exception):
     """模型返回的内容无法解析为有效的后援信息。"""
 
-
 class AftercareExtractor:
     """
     后援信息提取器。

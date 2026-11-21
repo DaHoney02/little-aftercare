@@ -6,7 +6,7 @@ from sqlalchemy.orm import sessionmaker, DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.pool import StaticPool
 
 from app.db.database import Base
-from app.db.message_repository import create_messages, list_messages
+from app.db.messages.message_repository import create_messages, list_messages
 from app.schemas.schemas import Message
 
 

@@ -4,7 +4,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.db.database import Base, get_db
-from app.db.message_api import message_router
+from app.api.message_api import message_router
 from fastapi import FastAPI
 
 

@@ -36,7 +36,7 @@ class SessionStore:
 
         return system_messages+conversation
 
-    def get_messages(self,session_id:str)->list[Message]:
+    def get_messages(self,session_id:str,user_id:int)->list[Message]:
         with self._lock:
             messages=self._sessions.get(session_id,[])
             return list(messages)
@@ -44,6 +44,7 @@ class SessionStore:
     def save_messages(
             self,
             session_id:str,
+            user_id:int,
             messages:list[Message],
     )-> None:
         with self._lock:

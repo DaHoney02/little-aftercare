@@ -3,18 +3,18 @@ import re
 from typing import Iterator
 from sqlalchemy.orm import Session
 
-from app.db.aftercare_respository import (
+from app.db.aftercare.aftercare_respository import (
     create_record,
     list_records,
     get_record,
     update_record,
     delete_record
 )
-from app.db.message_repository import (
+from app.db.messages.message_repository import (
     list_chat_messages,
     create_messages
 )
-from app.db.pending_aftercare_repository import (
+from app.db.aftercare.pending_aftercare_repository import (
     get_pending,
     delete_pending,
     save_pending
@@ -48,6 +48,7 @@ class ChatService:
     def chat(
             self,
             messages:list[Message],
+            user_id:int,
             session_id:str|None=None
     )->str:
         """
@@ -71,8 +72,9 @@ class ChatService:
             if self.db is not None:
                 # 有session_id时，优先PostgreSQL 历史记录
                 history=list_chat_messages(
-                    self.db,
-                    session_id
+                    db=self.db,
+                    session_id=session_id,
+                    user_id=user_id
                 )
             else:
                 # 保留内存存储行为
@@ -99,6 +101,7 @@ class ChatService:
         # 4.优先尝试处理售后业务
         answer = self._handle_aftercare_intent(
             user_text=user_text,
+            user_id=user_id,
             session_id=session_id
         )
         # None 表示这不是已处理的售后业务，继续走普通聊天。
@@ -126,6 +129,7 @@ class ChatService:
                 create_messages(
                     db=self.db,
                     session_id=session_id,
+                    user_id=user_id,
                     messages=turn_messages
                 )
             else:
@@ -144,6 +148,7 @@ class ChatService:
     def chat_stream(
             self,
             messages:list[Message],
+            user_id:int,
             session_id:str | None=None,
     )->Iterator[str]:
         """流式生成回答，并在回答完成后保存本轮对话"""
@@ -154,9 +159,13 @@ class ChatService:
         # 1、读取历史记录：API注入数据库时使用SQLite；否则保留内存存储行为
         if session_id:
             if self.db is not None:
-                history=list_chat_messages(self.db,session_id)
+                history=list_chat_messages(
+                    db=self.db,
+                    session_id=session_id,
+                    user_id=user_id
+                )
             else:
-                history=session_store.get_messages(session_id)
+                history=session_store.get_messages(session_id,user_id)
             # 拼接历史消息和本轮消息，执行历史裁剪
             full_messages=session_store.trim_messages(
                 history+messages
@@ -203,6 +212,7 @@ class ChatService:
                     create_messages(
                         db=self.db,
                         session_id=session_id,
+                        user_id=user_id,
                         messages=turn_messages
                     )
 
@@ -216,10 +226,10 @@ class ChatService:
 
 
     # 二、售后意图分流与候选记录处理
-
     def _handle_aftercare_intent(
             self,
             user_text: str,
+            user_id:int,
             session_id: str | None,
     ) -> str | None:
         """
@@ -241,7 +251,10 @@ class ChatService:
         # ==================================================
 
         if session_id and self.db is not None:
-            pending = get_pending(self.db, session_id)
+            pending = get_pending(
+                db=self.db,
+                user_id=user_id,
+                session_id=session_id)
 
             if pending is not None:
                 normalized = "".join(user_text.split())
@@ -262,7 +275,10 @@ class ChatService:
 
                 if normalized in cancel_commands:
                     try:
-                        delete_pending(self.db, session_id)
+                        delete_pending(
+                            db=self.db,
+                            user_id=user_id,
+                            session_id=session_id)
                         self.db.commit()
 
                         return "已取消当前待确认操作，正式售后记录未发生变化。"
@@ -301,13 +317,14 @@ class ChatService:
 
                         # 创建正式售后记录。
                         created_record = create_record(
-                            self.db,
-                            record_data,
+                            db=self.db,
+                            data=record_data,
                             session_id=session_id,
+                            user_id=user_id
                         )
 
                         # 清除待确认记录。
-                        delete_pending(self.db, session_id)
+                        delete_pending(db=self.db,user_id=user_id, session_id=session_id)
 
                         # 新增正式记录和清理 pending 一起提交。
                         self.db.commit()
@@ -342,13 +359,14 @@ class ChatService:
                         # 再次查询，防止记录在等待确认期间已被删除。
                         # 同时验证记录属于当前 session_id。
                         record = get_record(
-                            self.db,
+                            db=self.db,
                             record_id=record_id,
-                            session_id=session_id,
+                            user_id=user_id,
                         )
 
                         if record is None:
-                            delete_pending(self.db, session_id)
+                            delete_pending(
+                                db=self.db,user_id= user_id,session_id=session_id)
                             self.db.commit()
 
                             return (
@@ -359,10 +377,11 @@ class ChatService:
                         title = record.title
 
                         # 删除正式记录。
-                        delete_record(self.db, record)
+                        delete_record(db=self.db, user_id=user_id,record_id=record_id)
 
                         # 同时删除待确认记录。
-                        delete_pending(self.db, session_id)
+                        delete_pending(
+                            db=self.db, user_id=user_id,session_id=session_id)
 
                         # 两项操作统一提交。
                         self.db.commit()
@@ -426,13 +445,14 @@ class ChatService:
         if intent == "create_aftercare":
             return self._create_pending_aftercare(
                 user_text=user_text,
+                user_id=user_id,
                 session_id=session_id,
             )
 
         if intent == "query_aftercare":
-            records = list_records(
-                self.db,
-                session_id=session_id,
+            records,total = list_records(
+                db=self.db,
+                user_id=user_id,
                 limit=50,
                 offset=0,
             )
@@ -440,7 +460,7 @@ class ChatService:
             if not records:
                 return "当前会话还没有已保存的售后记录。"
 
-            lines = ["查询到以下售后记录："]
+            lines = [f"查询到以下售后记录：(共{total}条，当前展示{len(records)}条)"]
 
             for record in records:
                 lines.append(
@@ -464,6 +484,7 @@ class ChatService:
         if intent == "delete_aftercare":
             return self._delete_aftercare(
                 user_text=user_text,
+                user_id=user_id,
                 session_id=session_id,
             )
 
@@ -473,6 +494,7 @@ class ChatService:
     def _create_pending_aftercare(
             self,
             user_text: str,
+            user_id:int,
             session_id: str,
     ) -> str:
         """
@@ -518,9 +540,10 @@ class ChatService:
         # Repository 只执行 flush，不提交事务。
         try:
             save_pending(
-                self.db,
-                session_id,
-                candidate,
+                db=self.db,
+                user_id=user_id,
+                session_id=session_id,
+                candidate=candidate,
             )
 
             # 由 Service 统一提交。
@@ -580,8 +603,13 @@ class ChatService:
 
         return int(match.group(1))
 
-    def _update_aftercare(self, session_id: str, user_text: str) -> str:
-        """根据用户要求，提取并更新指定后援记录。"""
+    def _update_aftercare(
+            self,
+            user_id: int,
+            session_id: str,
+            user_text: str,
+    ) -> str:
+        """根据用户要求，提取并更新当前用户指定的售后记录。"""
 
         if self.db is None:
             return "数据库暂不可用，暂时无法修改记录。"
@@ -594,18 +622,11 @@ class ChatService:
         if record_id is None:
             return "请提供需要修改的记录 ID，例如：修改记录 ID 为 12 的保修日期。"
 
-        # 2. 查询记录，并校验当前会话是否拥有该记录。
-        record = get_record(db, record_id, session_id)
-
-        if record is None:
-            return f"没有找到 ID 为 {record_id} 的后援记录。"
-
         try:
-            # 3. 只提取用户明确要求修改的字段。
+            # 2. 调用 AI 提取用户明确要求修改的字段。
             extracted = self.aftercare_update_extractor.extract(user_text)
 
-            # 4. 只保留模型实际返回且值非空的字段。
-            # exclude_unset=True 可以排除用户没有提及的字段。
+            # 3. 只保留模型实际返回且值非空的字段。
             update_data = extracted.model_dump(
                 exclude_unset=True,
                 mode="python",
@@ -617,49 +638,59 @@ class ChatService:
                 if value is not None
             }
 
-            # 5. 没有识别出有效修改内容时，不操作数据库。
+            # 4. 没有识别出有效修改内容，不操作数据库。
             if not update_data:
                 return (
                     "没有识别到明确的修改内容。"
                     "请告诉我具体要修改哪个字段，以及修改后的内容。"
                 )
 
-            # 6. 再使用业务更新 Schema 校验一次。
+            # 5. 使用 Pydantic Schema 再次校验更新数据。
             update_schema = AftercareUpdate.model_validate(update_data)
 
-            # 7. 更新数据库记录。
-            update_record(db, record, update_schema)
+            # 6. Repository 根据 record_id + user_id 查询并更新。
+            # 不属于当前用户的记录也会返回 None。
+            updated_record = update_record(
+                db=db,
+                record_id=record_id,
+                user_id=user_id,
+                data=update_schema,
+            )
 
-            # 8. 提交事务。
+            if updated_record is None:
+                return f"没有找到 ID 为 {record_id} 的后援记录。"
+
+            # 7. 提交事务并刷新对象。
             db.commit()
-            db.refresh(record)
+            db.refresh(updated_record)
 
             logger.info(
-                "后援记录修改成功：session_id=%s, record_id=%s, fields=%s",
-                session_id,
+                "后援记录修改成功：user_id=%s, record_id=%s, fields=%s",
+                user_id,
                 record_id,
                 list(update_data.keys()),
             )
 
             return (
                 f"记录修改成功！\n"
-                f"记录 ID：{record.id}\n"
-                f"事项名称：{record.title}"
+                f"记录 ID：{updated_record.id}\n"
+                f"事项名称：{updated_record.title}"
             )
 
         except Exception:
             db.rollback()
 
             logger.exception(
-                "后援记录修改失败：session_id=%s, record_id=%s",
+                "后援记录修改失败：user_id=%s, session_id=%s, record_id=%s",
+                user_id,
                 session_id,
                 record_id,
             )
             raise
-
     def _delete_aftercare(
             self,
             user_text: str,
+            user_id:int,
             session_id: str,
     ) -> str:
         """
@@ -687,9 +718,9 @@ class ChatService:
 
         # 2. 检查记录是否存在，并验证会话归属。
         record = get_record(
-            self.db,
+            db=self.db,
             record_id=record_id,
-            session_id=session_id,
+            user_id=user_id,
         )
 
         if record is None:
@@ -705,9 +736,10 @@ class ChatService:
         # 4. 保存待确认操作，由 Service 负责事务提交。
         try:
             save_pending(
-                self.db,
-                session_id,
-                candidate,
+                db=self.db,
+                user_id=user_id,
+                session_id=session_id,
+                candidate=candidate,
             )
 
             self.db.commit()

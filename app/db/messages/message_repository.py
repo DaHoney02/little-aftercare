@@ -25,6 +25,7 @@ def create_message(
 def create_messages(
         db:Session,
         session_id:str,
+        user_id:int,
         messages:list[Message],
 )->None:
     """批量新增一轮对话。所有消息假如同一事务，再统一提交"""
@@ -35,6 +36,7 @@ def create_messages(
     records=[
         MessageRecord(
             session_id=session_id,
+            user_id=user_id,
             role=message.role,
             content=message.content
         )for message in messages
@@ -101,6 +103,7 @@ def delete_message(
 def list_chat_messages(
         db:Session,
         session_id:str,
+        user_id:int
 )->list[Message]:
     """读取数据库历史记录，转换为聊天模型需要的消息格式"""
     statement=(

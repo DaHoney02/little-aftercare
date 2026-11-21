@@ -10,9 +10,7 @@ from app.llm_client import LLMClient
 from app.services.aftercare_extractor import AftercareExtractionError
 from app.schemas.aftercare_extract import AftercareUpdateExtractResult
 
-
 logger = logging.getLogger(__name__)
-
 
 class AftercareUpdateExtractor:
     """将用户的修改要求提取为明确的字段变更。"""

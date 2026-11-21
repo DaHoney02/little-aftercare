@@ -1,23 +1,27 @@
-from datetime import date
-
+from typing import Literal
 from fastapi import APIRouter,status,HTTPException
 from fastapi.params import Depends, Query
 from sqlalchemy.orm import Session
 
-from app.db.aftercare_respository import (
+from app.core.dependencies import get_current_user
+from app.db.aftercare.aftercare_respository import (
     create_record,
     list_records,
     get_record,
     update_record,
-    delete_record, list_upcoming_deadline, list_overdue_deadline, list_notifications, get_notification
+    delete_record, list_notifications, get_notification
 )
 
 from app.db.database import get_db
+from app.db.models import User
 from app.schemas.aftercare import AftercareResponse, AftercareCreate, AftercareUpdate, DeadlineItem, \
-    OverdueDeadlineItem, DeadlineOverviewResponse, NotificationResponse
+    OverdueDeadlineItem, DeadlineOverviewResponse, NotificationResponse, AftercarePageResponse
 from app.schemas.aftercare_extract import AftercareExtractResult, AftercareExtractRequest
+from app.schemas.task import TaskResponse
 from app.services.aftercare_extractor import AftercareExtractor
 from app.services.dealine_service import get_upcoming_deadline_items, get_overdue_deadline_items
+from app.services.task_service import TaskService
+from app.utils.pagination import calculate_total_pages, calculate_offset
 
 router=APIRouter(prefix="/aftercare",tags=["后援记录"])
 
@@ -29,12 +33,19 @@ router=APIRouter(prefix="/aftercare",tags=["后援记录"])
 )
 def create_aftercare(
         data:AftercareCreate,
-        db:Session=Depends(get_db)
+        db:Session=Depends(get_db),
+        current_user:User=Depends(get_current_user)
 ):
     try:
         # 调用repository创建数据库对象  ;
-        # data.session_id or "default"->若请求带了“session_id”,就使用，反之，就使用“default”
-        record=create_record(db,data,data.session_id or "default")
+        session_id=data.session_id or "default"
+
+        record=create_record(
+            db=db,
+            data=data,
+            session_id=session_id,
+            user_id=current_user.id  #来自已验证的JWT
+        )
         db.commit()
         db.refresh(record)  #重新在数据库中读取ORM对象，获取数据库端生成的最新值
         return record
@@ -43,14 +54,54 @@ def create_aftercare(
         raise
 
 # 列表查询(api接收查询参数)
-@router.get("",response_model=list[AftercareResponse])
+@router.get(
+    "",
+    response_model=AftercarePageResponse,
+    summary="查询售后记录列表"
+)
 def get_aftercare_list(
-        session_id:str="default",
-        limit:int=Query(default=50,ge=1,le=100),
-        offset:int=Query(default=0,ge=0),
-        db:Session=Depends(get_db)
+        product_id: int | None = Query(default=None, ge=1),
+        page:int=Query(default=1,ge=1),
+        page_size:int=Query(default=10,ge=1,le=100),
+        keyword:str | None=Query(default=None,max_length=100),
+        status:str |None=Query(default=None,max_length=30),
+        deadline_type:Literal["return","warranty","both"] | None=None,
+        sort_order:Literal["asc","desc"] ="desc",
+        sort_by:Literal[
+            "created_at",
+            "purchase_date",
+            "return_deadline",
+            "warranty_deadline"
+        ]="created_at",
+        db:Session=Depends(get_db),
+        current_user:User=Depends(get_current_user)
 ):
-    return list_records(db,session_id,limit,offset)
+    # 将页码转换成数据库使用offset
+    # 统一计算数据库分页偏移量
+    offset = calculate_offset(page, page_size)
+
+    items, total = list_records(
+        db=db,
+        product_id=product_id,
+        user_id=current_user.id,
+        limit=page_size,
+        offset=offset,
+        keyword=keyword,
+        status=status,
+        deadline_type=deadline_type,
+        sort_by=sort_by,
+        sort_order=sort_order,
+    )
+
+    # 统一计算总页数
+    total_pages = calculate_total_pages(total, page_size)
+    return {
+        "items":items,
+        "total":total,
+        "page":page,
+        "page_size":page_size,
+        "total_pages":total_pages
+    }
 
 @router.post(
     "/extract",
@@ -59,24 +110,25 @@ def get_aftercare_list(
 )
 def extract_aftercare(
         request:AftercareExtractRequest,
+        current_user:User=Depends(get_current_user)
 )->AftercareExtractResult:
     """从自然语言提取后援事项候选信息，不直接 保存数据库"""
     extractor=AftercareExtractor()
     return extractor.extract(request.text)
 
-#查询到期列表
+#查询截止日期列表
 @router.get(
     "/deadlines/upcoming",
     response_model=list[DeadlineItem]
 )
 def get_upcoming_deadline(
-        session_id:str="default",
+        current_user:User=Depends(get_current_user),
         days:int=Query(default=7,ge=1,le=30),
         db:Session=Depends(get_db)
 ):
     return get_upcoming_deadline_items(
         db=db,
-        session_id=session_id,
+        user_id=current_user.id,
         days=days
     )
 
@@ -86,26 +138,27 @@ def get_upcoming_deadline(
     response_model=list[OverdueDeadlineItem],
 )
 def get_overdue_deadlines(
-        session_id:str="default",
-        db:Session=Depends(get_db)
+        current_user:User=Depends(get_current_user),
+        db:Session=Depends(get_db),
 )->list[OverdueDeadlineItem]:
     return get_overdue_deadline_items(
         db=db,
-        session_id=session_id,
+        user_id=current_user.id,
     )
 
+# 截止日期总览
 @router.get(
     "/deadlines/overview",
     response_model=DeadlineOverviewResponse,
 )
 def get_deadline_overview(
-        session_id:str="default",
+        current_user:User=Depends(get_current_user),
         days:int=Query(default=7,ge=1,le=30),
         db:Session=Depends(get_db)
 )->DeadlineOverviewResponse:
     return DeadlineOverviewResponse(
-        upcoming=get_upcoming_deadline_items(db,session_id,days),
-        overdue=get_overdue_deadline_items(db,session_id)
+        upcoming=get_upcoming_deadline_items(db=db,user_id=current_user.id,days=days),
+        overdue=get_overdue_deadline_items(db=db,user_id=current_user.id)
     )
 
 
@@ -116,7 +169,7 @@ def get_deadline_overview(
     summary="查询站内提醒"
 )
 def get_notifications(
-        session_id:str="default",
+        current_user: User = Depends(get_current_user),
         unread_only:bool=False,
         limit:int=Query(default=50,ge=1,le=100),
         offset:int=Query(default=0,ge=0),
@@ -124,7 +177,7 @@ def get_notifications(
 ):
     return list_notifications(
         db=db,
-        session_id=session_id,
+        user_id=current_user.id,
         unread_only=unread_only,
         limit=limit,
         offset=offset
@@ -133,17 +186,17 @@ def get_notifications(
 @router.patch(
     "/notifications/{notification_id}/read",
     response_model=NotificationResponse,
-    summary="件提醒标记为已读"
+    summary="将提醒标记为已读"
 )
 def mark_notification_read(
         notification_id:int,
-        session_id:str,
+        current_user: User = Depends(get_current_user),
         db:Session=Depends(get_db)
 ):
     notification=get_notification(
         db=db,
         notification_id=notification_id,
-        session_id=session_id
+        user_id=current_user.id
     )
 
     if notification is None:
@@ -162,10 +215,10 @@ def mark_notification_read(
 @router.get("/{record_id}",response_model=AftercareResponse)
 def get_aftercare_detail(
         record_id:int,
-        session_id:str,
+        current_user: User = Depends(get_current_user),
         db:Session=Depends(get_db)
 ):
-    record=get_record(db,record_id,session_id)
+    record=get_record(db=db,record_id=record_id,user_id=current_user.id)
     if record is None:
         raise HTTPException(
             status_code=404,
@@ -177,21 +230,28 @@ def get_aftercare_detail(
 @router.put("/{record_id}",response_model=AftercareResponse)
 def update_aftercare(
         record_id:int,
-        session_id:str,
         data:AftercareUpdate,
-        db:Session=Depends(get_db)
+        db:Session=Depends(get_db),
+        current_user: User = Depends(get_current_user),
+
 ):
     try:
-        record=get_record(db,record_id,session_id)
-        if record is None:
+        updated=update_record(
+            db=db,
+            record_id=record_id,
+            user_id=current_user.id,
+            data=data
+        )
+
+        if updated is None:
             raise HTTPException(
                 status_code=404,
                 detail="后援记录不存在"
             )
-        updated=update_record(db,record,data)
         db.commit()
         db.refresh(updated)
         return updated
+
     except Exception:
         db.rollback()
         raise
@@ -200,18 +260,55 @@ def update_aftercare(
 @router.delete("/{record_id}",status_code=status.HTTP_204_NO_CONTENT)
 def delete_aftercare(
         record_id:int,
-        session_id:str,
+        current_user:User=Depends(get_current_user),
         db:Session=Depends(get_db)
 ):
     try:
-        record=get_record(db,record_id,session_id)
-        if record is None:
+        deleted=delete_record(
+            db=db,record_id=record_id,user_id=current_user.id)
+        if not deleted:
             raise HTTPException(
                 status_code=404,
                 detail="后援记录不存在"
             )
-        delete_record(db,record)
         db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+@router.post(
+    "/from-deadline/{record_id}/{deadline_type}",
+    response_model=TaskResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="从售后期限创建任务",
+)
+def create_task_from_deadline(
+    record_id: int,
+    deadline_type: Literal["return", "warranty"],
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    service = TaskService(db)
+
+    try:
+        task = service.create_task_from_deadline(
+            user_id=current_user.id,
+            record_id=record_id,
+            deadline_type=deadline_type,
+        )
+
+        db.commit()
+        db.refresh(task)
+
+        return task
+
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
+
     except Exception:
         db.rollback()
         raise

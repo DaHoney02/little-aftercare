@@ -3,8 +3,8 @@ from fastapi import APIRouter, Depends,HTTPException
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
-from app.db.message_repository import create_message, list_messages
-from app.db.message_schemas import MessageRead, MessageCreate
+from app.db.messages.message_repository import create_message, list_messages
+from app.db.messages.message_schemas import MessageRead, MessageCreate
 
 message_router=APIRouter(tags=["messages"])
 

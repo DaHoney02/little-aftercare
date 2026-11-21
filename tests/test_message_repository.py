@@ -5,8 +5,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.db.database import Base
-from app.db.models import MessageRecord
-from app.db.message_repository import (
+from app.db.messages.message_repository import (
     create_message,
     delete_message,
     get_message,

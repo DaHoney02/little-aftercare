@@ -14,7 +14,6 @@ from app.schemas.schemas import ChatResponse, ChatRequest
 
 router=APIRouter()  #创建子路由对象router
 
-
 @router.post(
     "/chat",
     response_model=ResponseModel[ChatResponse])
