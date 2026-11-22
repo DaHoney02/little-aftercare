@@ -73,6 +73,11 @@ def list_tasks(
     priority: Literal["low", "medium", "high"] | None = None,
     source_type: Literal["manual", "system", "ai"] | None = None,
     keyword: str | None = Query(default=None, max_length=100),
+    source_key:str|None=Query(
+            default=None,
+            min_length=1,
+            max_length=200
+    ),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -88,6 +93,7 @@ def list_tasks(
         priority=priority,
         keyword=keyword,
         source_type=source_type,
+        source_key=source_key
     )
 
 @router.get(

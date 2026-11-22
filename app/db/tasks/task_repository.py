@@ -35,6 +35,23 @@ class TaskRepository:
         )
         return self.db.scalar(statement)
 
+    def list_system_tasks_by_aftercare(
+            self,
+            aftercare_id:int,
+            user_id:int
+    )->list[Task]:
+        """查询当前用户关联某条售后记录的全部系统任务
+
+        用于售后记录完成、删除或期限清空时，
+        找到需要同步处理的系统任务
+        """
+        statement=select(Task).where(
+            Task.user_id==user_id,
+            Task.aftercare_id==aftercare_id,
+            Task.source_type=="system"
+        )
+        return list(self.db.scalars(statement).all())
+
     def list_tasks(
             self,
             user_id:int,
@@ -43,7 +60,8 @@ class TaskRepository:
             status:str|None=None,
             keyword:str|None=None,
             source_type:str|None=None,
-            priority:str|None=None
+            priority:str|None=None,
+            source_key:str|None=None
     )->tuple[list[Task],int]:
         """分页查询当前用户任务"""
         conditions=[Task.user_id==user_id]
@@ -53,6 +71,8 @@ class TaskRepository:
             conditions.append(Task.priority==priority)
         if source_type:
             conditions.append(Task.source_type==source_type)
+        if source_key:
+            conditions.append(Task.source_key == source_key)
         if keyword:
             conditions.append(Task.title.ilike(f"%{keyword.strip()}%"))
 

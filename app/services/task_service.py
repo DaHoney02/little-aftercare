@@ -115,6 +115,7 @@ class TaskService:
             priority: str | None = None,
             keyword: str | None = None,
             source_type: str | None = None,
+            source_key: str | None = None
     ) -> dict:
         """分页查询任务。"""
 
@@ -126,6 +127,7 @@ class TaskService:
             priority=priority,
             keyword=keyword,
             source_type=source_type,
+            source_key=source_key
         )
 
         return {
@@ -214,6 +216,123 @@ class TaskService:
         """获取当前用户的全量任务统计"""
         return self.repository.get_task_stats(user_id)
 
+    @staticmethod
+    def _get_deadline_config(record:AftercareRecord)->dict:
+        """
+        获取一天售后记录中需要管理的期限配置
+        """
+        return {
+            "return_deadline":{
+                "deadline":record.return_deadline,
+                "title":"退货期限即将到期"
+            },
+            "warranty_deadline":{
+                "deadline":record.warranty_deadline,
+                "title":"保修期限即将到期"
+            }
+        }
+
+    def sync_aftercare_deadline_tasks(
+            self,
+            record:AftercareRecord
+    )->int:
+        """
+        根据一条售后记录，同步其对应的系统任务
+
+        1. 售后记录未完成且期限存在：创建或更新系统任务。
+        2. 期限被清空：取消对应的未完成系统任务。
+        3. 售后记录已完成：取消该记录关联的未完成系统任务。
+        4. 已完成任务不自动重开。
+        5. source_key 保证同一售后期限只有一条系统任务。
+
+        返回本次创建或更新的任务数量。
+        不提交事务，由调用方统一 commit / rollback。
+        """
+        configs=self._get_deadline_config(record)
+        changed_count=0
+        for source_suffix,config in configs.items():
+            source_key=f"aftercare:{record.id}:{source_suffix}"
+            deadline=config["deadline"]
+
+            existing_task = self.repository.get_by_source_key(
+                source_key=source_key,
+                user_id=record.user_id,
+            )
+
+            #售后完成，或对应期限已清空
+            #只取消尚未完成的任务
+            if record.status=="completed" or deadline is None:
+                if (
+                    existing_task is not None
+                    and existing_task.status in {"pending","in_progress"}
+                ):
+                    self.repository.update(
+                        existing_task,
+                        {
+                            "status":"cancelled",
+                            "completed_at":None
+                        }
+                    )
+                    changed_count += 1
+                continue
+
+            scheduled_at=datetime.combine(
+                deadline,
+                time.min,
+                tzinfo=timezone.utc,
+            )
+            days_remaining=(deadline-date.today()).days
+            priority="high" if days_remaining <= 3 else "medium"
+            task_data={
+                "user_id":record.user_id,
+                "product_id":record.product_id,
+                "aftercare_id":record.id,
+                "title":config["title"],
+                "description":(
+                    f"关联售后记录：{record.title or '未命名售后记录'}。"
+                    f"请在{deadline.isoformat()}前处理相关事项"
+                ),
+                "source_type":"system",
+                "source_key":source_key,
+                "status":"pending",
+                "priority":priority,
+                "scheduled_at":scheduled_at,
+                "reminder_at":None
+            }
+
+            #已存在任务：更新任务信息
+            if existing_task is not None:
+                # 已完成的任务不因修改期限而被重新打开
+                if existing_task.status=="completed":
+                    continue
+
+                # 已取消任务如果对应期限没有变化，就保留取消状态。
+                # 只有期限发生变化时，才重新激活这条系统任务。
+                if (
+                    existing_task.status=="cancelled"
+                    and existing_task.scheduled_at==scheduled_at
+                ):
+                    continue
+
+                self.repository.update(
+                    existing_task,
+                    {
+                        **task_data,
+                        # 若原任务已取消，而期限被重新设置，则重新激活同一条系统任务
+                        "status":"pending",
+                        "completed_at":None
+                    }
+                )
+                changed_count += 1
+                continue
+
+            #不存在任务：创建新的系统任务
+            created=self.repository.create_system_task_if_absent(task_data)
+            if created:
+                changed_count += 1
+
+        return  changed_count
+
     def generate_deadline_tasks(self, days: int = 7) -> int:
         """
         扫描即将到期的售后记录，生成系统任务。
@@ -297,7 +416,7 @@ class TaskService:
             record_id:int,
             deadline_type:str
     )->Task:
-        """根据售后期限创建系统任务"""
+        """根据指定售后期限获取对应系统任务"""
 
         # 查询当前用户的售后记录，防止跨用户访问
         record=self.db.scalar(
@@ -310,52 +429,35 @@ class TaskService:
             raise ValueError("售后记录不存在")
 
         deadline_map={
-            "return":(
-                record.return_deadline,
-                "处理商品退货"
-            ),
-            "warranty":(
-                record.warranty_deadline
-            )
+            "return":record.return_deadline,
+            "warranty":record.warranty_deadline,
         }
 
         if deadline_type not in deadline_map:
             raise ValueError("不支持的售后期限类型")
 
-        deadline,task_title=deadline_map[deadline_type]
-
-        if deadline is None:
+        if deadline_map[deadline_type] is None:
             raise ValueError("该售后记录没有设置对应期限")
+
         if record.status=="completed":
             raise ValueError("该售后记录已完成，不能创建任务")
-        # 使用唯一标识检查是否已经创建过对应任务
-        source_key=f"aftercare:{record.id}:{deadline_type}"
-        existing_task=self.repository.get_by_source_key(
-            source_key=source_key, user_id=user_id
-        )
-        if existing_task is not None:
-            return existing_task
 
-        scheduled_at=datetime.combine(
-            deadline,
-            time.min,
-            tzinfo=timezone.utc
+        self.sync_aftercare_deadline_tasks(record)
+
+        source_suffix=(
+            "return_deadline"
+            if deadline_type=="return"
+            else "warranty_deadline"
         )
 
-        task_data={
-            "user_id": user_id,
-            "product_id": record.product_id,
-            "aftercare_id": record.id,
-            "title": task_title,
-            "description": (
-                f"该任务由售后期限提醒创建，"
-                f"对应截止日期：{deadline}"
-            ),
-            "source_type": "system",
-            "source_key": source_key,
-            "status": "pending",
-            "priority": "high" if (deadline - date.today()).days <= 3 else "medium",
-            "scheduled_at": scheduled_at,
-            "reminder_at": None,
-        }
-        return self.repository.create(task_data)
+        source_key=f"aftercare:{record.id}:{source_suffix}"
+
+        task=self.repository.get_by_source_key(
+            source_key=source_key,
+            user_id=user_id
+        )
+
+        if task is None:
+            raise  RuntimeError("系统任务同步失败")
+
+        return  task

@@ -203,8 +203,10 @@ function MorphConfirm({
 /* =========================================================
    任务中心主组件
    ========================================================= */
-function TaskCenter() {
+function TaskCenter({ targetSourceKey = null }) {
   const [tasks, setTasks] = useState([])
+  // 用于定位目标任务卡片
+  const targetTaskRef = useRef(null)
   const [total, setTotal] = useState(0)
   const [taskStats, setTaskStats] = useState({
     total: 0,
@@ -283,6 +285,7 @@ function TaskCenter() {
         keyword: keyword.trim() || undefined,
         status: status || undefined,
         priority: priority || undefined,
+        source_key:targetSourceKey || undefined
       })
       setTasks(Array.isArray(result?.items) ? result.items : [])
       setTotal(Number(result?.total ?? 0))
@@ -291,7 +294,7 @@ function TaskCenter() {
     } finally {
       setLoading(false)
     }
-  }, [page, keyword, status, priority])
+  }, [page, keyword, status, priority,targetSourceKey])
 
   const loadTaskStats = useCallback(async () => {
     try {
@@ -417,6 +420,17 @@ function TaskCenter() {
     return () => document.removeEventListener('pointerdown', closeNativeDatePicker, true)
   }, [])
 
+  // 从工作台提醒进入任务中心时，清除旧筛选条件
+    useEffect(() => {
+      if (!targetSourceKey) return
+
+      setPage(1)
+      setKeyword('')
+      setStatus('')
+      setPriority('')
+    }, [targetSourceKey])
+
+
   // 更多操作菜单：点击菜单外部或按 ESC 时收起
   useEffect(() => {
     if (openActionMenuId === null) return undefined
@@ -437,6 +451,22 @@ function TaskCenter() {
       document.removeEventListener('keydown', closeMenuOnEscape)
     }
   }, [openActionMenuId])
+
+  // 目标任务加载完成后，滚动到对应卡片
+    useEffect(() => {
+      if (!targetSourceKey || loading) return
+
+      const targetTask = tasks.find(
+        (task) => task.source_key === targetSourceKey
+      )
+
+      if (targetTask) {
+        targetTaskRef.current?.scrollIntoView({
+          behavior: 'smooth',
+          block: 'center',
+        })
+      }
+    }, [targetSourceKey, tasks, loading])
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
@@ -891,13 +921,23 @@ function TaskCenter() {
           <div className="task-empty">正在加载任务...</div>
         ) : tasks.length === 0 ? (
           <div className="task-empty">
-            <span>✳</span>
-            <strong>这里还没有任务</strong>
-            <p>创建一个任务，开始安排接下来的行动。</p>
-            <button className="task-primary-btn" onClick={openCreate}>
-              ＋ 创建第一个任务
-            </button>
-          </div>
+              <span>✳</span>
+
+              {targetSourceKey ? (
+                <>
+                  <strong>暂未找到关联的系统任务</strong>
+                  <p>这条售后期限提醒暂时没有对应任务，请刷新后重试。</p>
+                </>
+              ) : (
+                <>
+                  <strong>这里还没有任务</strong>
+                  <p>创建一个任务，开始安排接下来的行动。</p>
+                  <button className="task-primary-btn" onClick={openCreate}>
+                    ＋ 创建第一个任务
+                  </button>
+                </>
+              )}
+            </div>
         ) : (
           tasks.map((task) => {
             const isCompleted = task.status === 'completed'
@@ -907,9 +947,20 @@ function TaskCenter() {
 
             return (
               <article
-                className={`task-item ${isCompleted ? 'is-completed' : ''}`}
-                key={task.id}
-              >
+                  ref={
+                    task.source_key === targetSourceKey
+                      ? targetTaskRef
+                      : null
+                  }
+                  className={`task-item ${
+                    isCompleted ? 'is-completed' : ''
+                  } ${
+                    task.source_key === targetSourceKey
+                      ? 'is-deadline-target'
+                      : ''
+                  }`}
+                  key={task.id}
+                >
                 <div className="task-item-main">
                   {canCheck && (
                     <button

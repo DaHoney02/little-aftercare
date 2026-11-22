@@ -46,6 +46,10 @@ def create_aftercare(
             session_id=session_id,
             user_id=current_user.id  #来自已验证的JWT
         )
+        # 售后记录创建成功后，同步其退货和保修期限任务
+        task_service=TaskService(db)
+        task_service.sync_aftercare_deadline_tasks(record)
+
         db.commit()
         db.refresh(record)  #重新在数据库中读取ORM对象，获取数据库端生成的最新值
         return record
@@ -248,6 +252,9 @@ def update_aftercare(
                 status_code=404,
                 detail="后援记录不存在"
             )
+        task_service=TaskService(db)
+        task_service.sync_aftercare_deadline_tasks(updated)
+
         db.commit()
         db.refresh(updated)
         return updated

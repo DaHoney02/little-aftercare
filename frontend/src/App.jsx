@@ -68,6 +68,8 @@ function App() {
   const [activePage, setActivePage] = useState('overview')
   // 工作台内部视图：总览与全部任务，共用一个导航入口。
   const [workspaceView, setWorkspaceView] = useState('overview')
+  // 保存从售后期限提醒进入任务中心时，需要定位的系统任务标识
+  const [deadlineTaskSourceKey, setDeadlineTaskSourceKey] = useState(null)
   const [notificationsOpen, setNotificationsOpen] = useState(false)
   const [detailRecord, setDetailRecord] = useState(null)
 
@@ -259,7 +261,24 @@ function App() {
     else setError('暂时找不到对应记录，请刷新列表后重试。')
   }
 
-  const openDeadlineRecord = (item) => openRecordById(item.record_id)
+      // 点击售后期限提醒，定位对应的系统任务
+  const openDeadlineTask = (item) => {
+      const deadlineSuffix = {
+        return: 'return_deadline',
+        warranty: 'warranty_deadline',
+      }[item.deadline_type]
+
+      if (!deadlineSuffix || !item.record_id) {
+        setError('无法识别这条提醒对应的售后期限。')
+        return
+      }
+
+      // 与后端自动任务使用相同的 source_key 规则
+      const sourceKey = `aftercare:${item.record_id}:${deadlineSuffix}`
+
+      setDeadlineTaskSourceKey(sourceKey)
+      setWorkspaceView('tasks')
+    }
 
   // ---------- 售后记录表单 ----------
   const openCreate = () => {
@@ -598,8 +617,23 @@ function App() {
           </section>
 
           <section className="deadline-grid">
-            <DeadlinePanel title="即将到期" subtitle="点击事项查看商品详情" items={overview.upcoming} kind="upcoming" onItemClick={openDeadlineRecord} />
-            <DeadlinePanel title="已过期事项" subtitle="点击事项查看商品详情" items={overview.overdue} kind="overdue" onItemClick={openDeadlineRecord} />
+            <section className="deadline-grid">
+              <DeadlinePanel
+                title="即将到期"
+                subtitle="点击事项查看关联任务"
+                items={overview.upcoming}
+                kind="upcoming"
+                onItemClick={openDeadlineTask}
+              />
+
+              <DeadlinePanel
+                title="已过期事项"
+                subtitle="点击事项查看关联任务"
+                items={overview.overdue}
+                kind="overdue"
+                onItemClick={openDeadlineTask}
+              />
+            </section>
           </section>
 
           <section className="ai-panel">
@@ -628,7 +662,7 @@ function App() {
               </div>
             </div>}
           </section>
-          </> : <div className="workspace-task-view"><TaskCenter /></div>}
+          </> : <div className="workspace-task-view"><TaskCenter targetSourceKey={deadlineTaskSourceKey}/></div>}
         </section>}
 
         {/* 商品档案页面 */}
