@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { aftercareApi } from './api.js'
+import { aftercareApi,taskNotificationApi } from './api.js'
 import { useAuth } from './pages/AuthContext.jsx'
 import AuthPage from './pages/AuthPage.jsx'
 import ProfilePage from './pages/ProfilePage.jsx'
@@ -32,6 +32,21 @@ const dateText = (value) => {
     year: 'numeric',
     month: 'long',
     day: 'numeric',
+  }).format(date)
+}
+
+const dateTimeText = (value) => {
+  if (!value) return '未设置'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return String(value)
+  }
+  return new Intl.DateTimeFormat('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
   }).format(date)
 }
 
@@ -72,6 +87,7 @@ function App() {
   const [deadlineTaskSourceKey, setDeadlineTaskSourceKey] = useState(null)
   const [notificationsOpen, setNotificationsOpen] = useState(false)
   const [detailRecord, setDetailRecord] = useState(null)
+  const [targetTaskId, setTargetTaskId] = useState(null)
 
   // 登录状态确认后加载数据。此处不把异步函数直接交给 useEffect。
   const loadData = useCallback(async (showLoading = false) => {
@@ -79,10 +95,11 @@ function App() {
     setError('')
 
     try {
-      const [recordData, deadlineData, notificationData] = await Promise.all([
+      const [recordData, deadlineData, notificationData,taskNotificationData] = await Promise.all([
         aftercareApi.list(SESSION_ID),
         aftercareApi.overview(SESSION_ID),
         aftercareApi.notifications(SESSION_ID),
+        taskNotificationApi.list()
       ])
 
       // 兼容旧接口直接返回数组，以及包装成 { items: [] } 的接口格式。
@@ -97,7 +114,17 @@ function App() {
         upcoming: Array.isArray(deadlineData?.upcoming) ? deadlineData.upcoming : [],
         overdue: Array.isArray(deadlineData?.overdue) ? deadlineData.overdue : [],
       })
-      setNotifications(Array.isArray(notificationData) ? notificationData : [])
+//   两种通知合并到一个状态中
+      setNotifications([
+          ...notificationData.map((item)=>({
+              ...item,
+              notification_type:'aftercare',
+          })),
+          ...taskNotificationData.map((item)=>({
+              ...item,
+              notification_type:'task',
+          }))
+      ])
     } catch (err) {
       setError(getErrorMessage(err, '暂时无法连接服务，请确认后端已启动。'))
     } finally {
@@ -241,17 +268,42 @@ function App() {
   }
 
   // ---------- 通知 ----------
-  const markNotificationRead = async (notificationId) => {
+  const markNotificationRead = async (notification) => {
     setError('')
+
     try {
-      const updated = await aftercareApi.markNotificationRead(notificationId, SESSION_ID)
+      const updated = notification.notification_type=== 'task'
+       ? await taskNotificationApi.markRead(notification.id)
+       : await aftercareApi.markNotificationRead(notification.id, SESSION_ID)
+
       setNotifications((current) => current.map((item) =>
-        item.id === notificationId ? updated : item
+        item.id === notification.id &&
+        item.notification_type===notification.notification_type
+        ?{
+            ...item,
+            ...updated,
+         }
+        :item
       ))
     } catch (err) {
       setError(getErrorMessage(err, '暂时无法更新提醒状态。'))
     }
   }
+// 区分notification_type
+  const openNotification = (item) => {
+      setNotificationsOpen(false)
+
+      if (item.notification_type === 'task') {
+        setDeadlineTaskSourceKey(null)
+        setTargetTaskId(item.task_id)
+        setWorkspaceView('tasks')
+        setActivePage('overview')
+        return
+      }
+
+      openRecordById(item.record_id)
+  }
+
 
   const openRecordById = (recordId) => {
     // 先关闭提醒层，再打开详情层，避免提醒弹窗遮挡详情弹窗。
@@ -617,7 +669,6 @@ function App() {
           </section>
 
           <section className="deadline-grid">
-            <section className="deadline-grid">
               <DeadlinePanel
                 title="即将到期"
                 subtitle="点击事项查看关联任务"
@@ -633,7 +684,6 @@ function App() {
                 kind="overdue"
                 onItemClick={openDeadlineTask}
               />
-            </section>
           </section>
 
           <section className="ai-panel">
@@ -662,7 +712,8 @@ function App() {
               </div>
             </div>}
           </section>
-          </> : <div className="workspace-task-view"><TaskCenter targetSourceKey={deadlineTaskSourceKey}/></div>}
+          </> : <div className="workspace-task-view">
+              <TaskCenter targetSourceKey={deadlineTaskSourceKey} targetTaskId={targetTaskId}/></div>}
         </section>}
 
         {/* 商品档案页面 */}
@@ -817,7 +868,7 @@ function App() {
         notifications={notifications}
         onClose={() => setNotificationsOpen(false)}
         onMarkRead={markNotificationRead}
-        onOpenRecord={openRecordById}
+        onOpenNotification={openNotification}
       />}
 
       {detailRecord && <RecordDetailModal
@@ -868,7 +919,7 @@ function RecordCard({ record, onEdit, onDelete, onDetails }) {
   </article>
 }
 
-function NotificationModal({ notifications, onClose, onMarkRead, onOpenRecord }) {
+function NotificationModal({ notifications, onClose, onMarkRead, onOpenNotification }) {
   const unreadCount = notifications.filter((item) => item.status === 'unread').length
 
   return <div className="modal-backdrop notification-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
@@ -884,13 +935,21 @@ function NotificationModal({ notifications, onClose, onMarkRead, onOpenRecord })
           {notifications.map((item) => (
             <article className={`notification-card ${item.status}`} key={item.id}>
               <div className="notification-mark">{item.deadline_type === 'return' ? '退' : '保'}</div>
-              <button type="button" className="notification-content notification-record-link" onClick={() => onOpenRecord(item.record_id)}>
-                <strong>{item.deadline_type === 'return' ? '退货期限提醒' : '保修期限提醒'}</strong>
-                <p>记录 #{item.record_id} · 截止日期 {dateText(item.deadline)}</p>
-                <small>提醒日期 {dateText(item.remind_on)}</small>
+              <button type="button" className="notification-content notification-record-link" onClick={() => onOpenNotification(item)}>
+                <strong>{item.notification_type === 'task' ? '任务提醒' : item.deadline_type==='return' ? '退货期限提醒' :'保修期限提醒'}</strong>
+                {item.notification_type==='task' ? (
+                    <>
+                        <p>任务 #{item.task_id}</p>
+                        <small>提醒时间{dateTimeText(item.reminder_at)}</small>
+                    </>
+                ):(
+                    <><p>记录 #{item.record_id} · 截止日期{dateText(item.deadline)}</p>
+                      <small>提醒时间{dateText(item.remind_on)}</small>
+                    </>
+                )}
               </button>
               {item.status === 'unread'
-                ? <button type="button" className="secondary-button" onClick={() => onMarkRead(item.id)}>标记已读</button>
+                ? <button type="button" className="secondary-button" onClick={() => onMarkRead(item)}>标记已读</button>
                 : <span className="read-label">已读</span>}
             </article>
           ))}

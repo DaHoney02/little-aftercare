@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from app.db.database import get_db
+from app.services.task_reminder_job import generate_task_reminders
 from app.services.task_service import TaskService
 
 logger = logging.getLogger(__name__)
@@ -37,10 +38,8 @@ def run_deadline_task_scan() -> None:
     except Exception:
         db.rollback()
         logger.exception("售后期限任务扫描失败")
-
     finally:
         db_generator.close()
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -60,14 +59,23 @@ async def lifespan(app: FastAPI):
         coalesce=True,
         next_run_time=datetime.now(timezone.utc),
     )
+    # 每分钟扫描一次已经到达提醒时间的任务
+    scheduler.add_job(
+        generate_task_reminders,
+        trigger="interval",
+        minutes=1,
+        id="task_reminder_scan",
+        name="任务提醒通知扫描",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
 
     scheduler.start()
-
     app.state.scheduler = scheduler
 
     try:
         yield
-
     finally:
         if scheduler.running:
             scheduler.shutdown(wait=False)

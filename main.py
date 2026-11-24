@@ -17,6 +17,7 @@ from app.api.aftercare_api import router as aftercare_router
 from app.api.product_cred_api import router as credential_router
 from app.api.auth_api import router as auth_router
 from app.api.tasks_api import router as task_router
+from app.api.task_notification_api import router as task_notification_router
 from app.services.aftercare_extractor import AftercareExtractionError
 
 logger=setup_logger()
@@ -66,6 +67,7 @@ app.include_router(auth_router)
 app.include_router(product_router)
 app.include_router(credential_router)
 app.include_router(task_router)
+app.include_router(task_notification_router)
 
 
 @app.get("/")

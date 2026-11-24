@@ -562,3 +562,60 @@ class Task(Base):
         onupdate=func.now()
     )
 
+class TaskNotificationRecord(Base):
+    """任务提醒通知记录。
+
+    一条任务可以产生多条不同提醒，但同一个提醒时间只能生成一次通知。
+    """
+
+    __tablename__ = "task_notification_records"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "task_id",
+            "reminder_at",
+            name="uq_task_notification_reminder"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        index=True
+    )
+
+    # 通知所属用户
+    user_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
+
+    # 关联任务，任务删除时清理通知
+    task_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("tasks.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
+
+    # 本次通知对应的提醒时间
+    reminder_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False
+    )
+
+    # 通知状态：unread / read
+    status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="unread",
+        server_default="unread"
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now()
+    )

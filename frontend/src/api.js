@@ -251,6 +251,24 @@ export const aftercareApi = {
     }),
 }
 
+//任务通知提醒
+export const taskNotificationApi = {
+  // 查询任务提醒
+  list: (unreadOnly = false) =>
+    request(
+      withQuery('/task-notifications', {
+        unread_only: unreadOnly,
+        limit: 50,
+        offset: 0,
+      })
+    ),
+
+  // 标记任务提醒为已读
+  markRead: (id) =>
+    request(`/task-notifications/${id}/read`, {
+      method: 'PATCH',
+    }),
+}
 /* =========================
    6. 个人中心 API
 ========================= */

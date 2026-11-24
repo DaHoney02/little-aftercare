@@ -203,7 +203,7 @@ function MorphConfirm({
 /* =========================================================
    任务中心主组件
    ========================================================= */
-function TaskCenter({ targetSourceKey = null }) {
+function TaskCenter({ targetSourceKey = null,targetTaskId=null }) {
   const [tasks, setTasks] = useState([])
   // 用于定位目标任务卡片
   const targetTaskRef = useRef(null)
@@ -280,11 +280,11 @@ function TaskCenter({ targetSourceKey = null }) {
     setError('')
     try {
       const result = await taskApi.list({
-        page,
+        page:targetSourceKey ? 1 : page,
         page_size: PAGE_SIZE,
-        keyword: keyword.trim() || undefined,
-        status: status || undefined,
-        priority: priority || undefined,
+        keyword:targetSourceKey ? undefined: keyword.trim() || undefined,
+        status:targetSourceKey?undefined: status || undefined,
+        priority:targetSourceKey ?undefined: priority || undefined,
         source_key:targetSourceKey || undefined
       })
       setTasks(Array.isArray(result?.items) ? result.items : [])
@@ -457,7 +457,13 @@ function TaskCenter({ targetSourceKey = null }) {
       if (!targetSourceKey || loading) return
 
       const targetTask = tasks.find(
-        (task) => task.source_key === targetSourceKey
+        (task) => (
+                      targetTaskId !== null &&
+                      Number(task.id) === Number(targetTaskId)
+                    ) || (
+                      targetSourceKey &&
+                      task.source_key === targetSourceKey
+                    )
       )
 
       if (targetTask) {
@@ -467,6 +473,38 @@ function TaskCenter({ targetSourceKey = null }) {
         })
       }
     }, [targetSourceKey, tasks, loading])
+
+// 目标任务详情加载
+    useEffect(() => {
+          if (!targetTaskId) return
+          let cancelled = false
+          const loadTargetTask = async () => {
+            try {
+              setLoading(true)
+              const task = await taskApi.get(targetTaskId)
+              if (cancelled) return
+
+              setTasks([task])
+              setTotal(1)
+              setPage(1)
+            } catch (err) {
+              if (!cancelled) {
+                setError(err.message || '无法加载对应任务。')
+                setTasks([])
+                setTotal(0)
+              }
+            } finally {
+              if (!cancelled) {
+                setLoading(false)
+              }
+            }
+          }
+          loadTargetTask()
+
+          return () => {
+            cancelled = true
+          }
+        }, [targetTaskId])
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
