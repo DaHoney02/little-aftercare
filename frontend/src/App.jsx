@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState,useRef} from 'react'
 import { aftercareApi,taskNotificationApi } from './api.js'
 import { useAuth } from './pages/AuthContext.jsx'
 import AuthPage from './pages/AuthPage.jsx'
@@ -294,27 +294,52 @@ function App() {
   }
 
   // ---------- 通知 ----------
-  const markNotificationRead = async (notification) => {
-    setError('')
 
-    try {
-      const updated = notification.notification_type=== 'task'
-       ? await taskNotificationApi.markRead(notification.id)
-       : await aftercareApi.markNotificationRead(notification.id, SESSION_ID)
+    // created_at 只解析一次，避免 sort 比较函数里反复 new Date()
+    const toTime = (value) => (value ? Date.parse(value) : 0)
 
-      setNotifications((current) => current.map((item) =>
-        item.id === notification.id &&
-        item.notification_type===notification.notification_type
-        ?{
-            ...item,
-            ...updated,
-         }
-        :item
-      ))
-    } catch (err) {
-      setError(getErrorMessage(err, '暂时无法更新提醒状态。'))
-    }
-  }
+    const markingRef = useRef(new Set()) // 在组件顶层，防并发重复请求
+
+    const markNotificationRead = useCallback(
+      async (notification) => {
+        if (!notification?.id) return
+
+        const key = `${notification.notification_type}:${notification.id}`
+        if (markingRef.current.has(key)) return // 同一通知正在处理中，直接丢弃
+
+        setError('')
+        markingRef.current.add(key)
+
+        try {
+          const updated =
+            notification.notification_type === 'task'
+              ? await taskNotificationApi.markRead(notification.id)
+              : await aftercareApi.markNotificationRead(notification.id, SESSION_ID)
+
+          setNotifications((current) => {
+            let hit = false
+            const next = current.map((item) => {
+              if (
+                item.id === notification.id &&
+                item.notification_type === notification.notification_type
+              ) {
+                hit = true
+                return { ...item, ...updated }
+              }
+              return item
+            })
+            // 没命中就返回原引用，React 会跳过这次 re-render
+            return hit ? next : current
+          })
+        } catch (err) {
+          setError(getErrorMessage(err, '暂时无法更新提醒状态。'))
+        } finally {
+          markingRef.current.delete(key)
+        }
+      },
+      [SESSION_ID]
+    )
+
 // 区分notification_type
   const openNotification = (item) => {
       setNotificationsOpen(false)

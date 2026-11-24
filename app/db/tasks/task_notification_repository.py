@@ -1,11 +1,21 @@
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import select, and_, or_
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from app.db.models import Task, TaskNotificationRecord
 
+NOTI_ACTIVE_STATUSES = ("pending", "in_progress")
+NOTI_STATUS_DISMISSED = "dismissed"
+NOTI_STATUS_READ = "read"
+NOTI_STATUS_UNREAD = "unread"
+MAX_PAGE_SIZE = 100
+
+# 列元数据只算一次：key 用属性名，避免列名/属性名不一致
+_NOTI_ATTRS = tuple(
+    attr.key for attr in TaskNotificationRecord.__mapper__.column_attrs
+)
 
 class TaskNotificationRepository:
     """任务通知数据库操作层。"""
@@ -40,45 +50,57 @@ class TaskNotificationRepository:
 
         return inserted_id is not None
 
+
+
     def list_by_user(
-        self,
-        user_id: int,
-        limit: int = 50,
-        offset: int = 0,
-        unread_only: bool = False,
+            self,
+            user_id: int,
+            limit: int = 50,
+            offset: int = 0,
+            unread_only: bool = False,
     ) -> list[dict]:
-        """查询当前用户的有效任务通知，并返回关联任务标题。"""
+        """查询当前用户有效的任务通知，并返回关联任务标题。"""
+        noti = TaskNotificationRecord
+        limit = max(1, min(limit, MAX_PAGE_SIZE))
 
         statement = (
-            select(
-                TaskNotificationRecord,
-                Task.title.label("task_title")
-            )
-            .outerjoin(
+            select(noti, Task.title.label("task_title"))
+            .join(
                 Task,
-                TaskNotificationRecord.task_id==Task.id,
+                and_(noti.task_id == Task.id, Task.user_id == user_id),
             )
             .where(
-                TaskNotificationRecord.user_id == user_id,
-                TaskNotificationRecord.status != "dismissed"
-            ))
+                noti.user_id == user_id,
+                noti.status != NOTI_STATUS_DISMISSED,
+            )
+        )
 
         if unread_only:
+            # 只关心未读：任务必须仍有效，OR 分支可省
             statement = statement.where(
-                TaskNotificationRecord.status == "unread"
+                noti.status == NOTI_STATUS_UNREAD,
+                Task.status.in_(NOTI_ACTIVE_STATUSES),
+            )
+        else:
+            statement = statement.where(
+                or_(
+                    Task.status.in_(NOTI_ACTIVE_STATUSES),
+                    noti.status == NOTI_STATUS_READ,
+                )
             )
 
         statement = (
             statement
-            .order_by(
-                TaskNotificationRecord.created_at.desc(),
-                TaskNotificationRecord.id.desc(),
-            )
+            .order_by(noti.created_at.desc(), noti.id.desc())
             .limit(limit)
             .offset(offset)
         )
 
-        return list(self.db.scalars(statement).all())
+        rows = self.db.execute(statement).all()
+        return [
+            {**{key: getattr(notification, key) for key in _NOTI_ATTRS}, "task_title": task_title}
+            for notification, task_title in rows
+        ]
 
     def get_by_id(
         self,

@@ -209,14 +209,11 @@ class TaskService:
             update_data["completed_at"] = None
 
         old_reminder_at = task.reminder_at
-
         updated_task = self.repository.update(task, update_data)
-
         reminder_changed = (
                 "reminder_at" in update_data
                 and old_reminder_at != updated_task.reminder_at
         )
-
         task_no_longer_active = updated_task.status in {
             "completed",
             "cancelled",

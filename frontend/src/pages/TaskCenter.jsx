@@ -51,7 +51,7 @@ const toDateTimeLocal = (value) => {
 }
 
 /* =========================================================
-   全窗口形变弹层：触发按钮直接扩展为全屏遮罩，内容在视口中央出现
+   全窗口形变弹层
    ========================================================= */
 function MorphViewport({ anchorRect, expanded, children, onBackdropMouseDown, className = '' }) {
   const viewportRef = useRef(null)
@@ -76,9 +76,6 @@ function MorphViewport({ anchorRect, expanded, children, onBackdropMouseDown, cl
     return () => cancelAnimationFrame(frame)
   }, [expanded])
 
-  // 弹层必须挂载到 body，而不是任务页面内部：
-  // 页面祖先节点若存在 transform / filter / overflow，会改变 fixed 的定位基准，
-  // 导致“全屏”只覆盖页面局部、或弹窗无法真正处于浏览器视口中心。
   useEffect(() => {
     if (!expanded) return undefined
     const previousOverflow = document.body.style.overflow
@@ -105,7 +102,7 @@ function MorphViewport({ anchorRect, expanded, children, onBackdropMouseDown, cl
 }
 
 /* =========================================================
-   形变确认卡片组件
+   形变确认卡片
    ========================================================= */
 function MorphConfirm({
   type,
@@ -121,13 +118,20 @@ function MorphConfirm({
   const [busy, setBusy] = useState(false)
   const closeTimer = useRef(null)
 
+  // [FIX] 把内层 rAF 的句柄提到外层变量，卸载时能真正取消
   useEffect(() => {
+    let secondFrame
     const firstFrame = requestAnimationFrame(() => {
-      const secondFrame = requestAnimationFrame(() => setExpanded(true))
-      return () => cancelAnimationFrame(secondFrame)
+      secondFrame = requestAnimationFrame(() => setExpanded(true))
     })
-    return () => cancelAnimationFrame(firstFrame)
+    return () => {
+      cancelAnimationFrame(firstFrame)
+      if (secondFrame) cancelAnimationFrame(secondFrame)
+    }
   }, [anchorRect])
+
+  // [FIX] 组件卸载时清理关闭定时器
+  useEffect(() => () => clearTimeout(closeTimer.current), [])
 
   const handleClose = useCallback((force = false) => {
     if (busy && !force) return
@@ -153,6 +157,7 @@ function MorphConfirm({
       await onConfirm()
       handleClose(true)
     } catch (err) {
+      // [FIX] 失败时保持弹窗打开，让用户能看到页面顶部的错误提示并重试
       setBusy(false)
     }
   }
@@ -203,10 +208,8 @@ function MorphConfirm({
 /* =========================================================
    任务中心主组件
    ========================================================= */
-function TaskCenter({ targetSourceKey = null,targetTaskId=null }) {
+function TaskCenter({ targetSourceKey = null, targetTaskId = null }) {
   const [tasks, setTasks] = useState([])
-  // 用于定位目标任务卡片
-  const targetTaskRef = useRef(null)
   const [total, setTotal] = useState(0)
   const [taskStats, setTaskStats] = useState({
     total: 0,
@@ -225,6 +228,7 @@ function TaskCenter({ targetSourceKey = null,targetTaskId=null }) {
   const [modalError, setModalError] = useState('')
   const [modalAuthError, setModalAuthError] = useState('')
   const [celebratingTaskId, setCelebratingTaskId] = useState(null)
+  const celebrateTimer = useRef(null) // [FIX] 用于卸载时清理
 
   const [keyword, setKeyword] = useState('')
   const [status, setStatus] = useState('')
@@ -256,15 +260,13 @@ function TaskCenter({ targetSourceKey = null,targetTaskId=null }) {
   const productIdRef = useRef('')
   const aftercareIdRef = useRef('')
 
-  // 形变确认卡片状态
   const [morph, setMorph] = useState(null)
-
-  // 当前展开“更多操作”菜单的任务 ID；同一时间只允许展开一个菜单
   const [openActionMenuId, setOpenActionMenuId] = useState(null)
 
   useEffect(() => () => {
     clearTimeout(modalCloseTimer.current)
     clearTimeout(completionCloseTimer.current)
+    clearTimeout(celebrateTimer.current) // [FIX]
   }, [])
 
   useEffect(() => {
@@ -275,17 +277,21 @@ function TaskCenter({ targetSourceKey = null,targetTaskId=null }) {
     aftercareIdRef.current = form.aftercare_id
   }, [form.aftercare_id])
 
-  const loadTasks = useCallback(async () => {
+  // [FIX] 单任务模式下跳过列表请求，避免与 targetTaskId effect 竞态覆盖
+  const loadTasks = useCallback(async (pageOverride) => {
+    if (targetTaskId != null) return
+
     setLoading(true)
     setError('')
     try {
+      const pageToUse = pageOverride ?? (targetSourceKey ? 1 : page)
       const result = await taskApi.list({
-        page:targetSourceKey ? 1 : page,
+        page: pageToUse,
         page_size: PAGE_SIZE,
-        keyword:targetSourceKey ? undefined: keyword.trim() || undefined,
-        status:targetSourceKey?undefined: status || undefined,
-        priority:targetSourceKey ?undefined: priority || undefined,
-        source_key:targetSourceKey || undefined
+        keyword: targetSourceKey ? undefined : keyword.trim() || undefined,
+        status: targetSourceKey ? undefined : status || undefined,
+        priority: targetSourceKey ? undefined : priority || undefined,
+        source_key: targetSourceKey || undefined,
       })
       setTasks(Array.isArray(result?.items) ? result.items : [])
       setTotal(Number(result?.total ?? 0))
@@ -294,7 +300,7 @@ function TaskCenter({ targetSourceKey = null,targetTaskId=null }) {
     } finally {
       setLoading(false)
     }
-  }, [page, keyword, status, priority,targetSourceKey])
+  }, [page, keyword, status, priority, targetSourceKey, targetTaskId])
 
   const loadTaskStats = useCallback(async () => {
     try {
@@ -321,6 +327,7 @@ function TaskCenter({ targetSourceKey = null,targetTaskId=null }) {
     loadTaskStats()
   }, [loadTaskStats])
 
+  // 商品列表（弹窗内搜索）
   useEffect(() => {
     if (!modalOpen) return undefined
     const controller = new AbortController()
@@ -361,6 +368,7 @@ function TaskCenter({ targetSourceKey = null,targetTaskId=null }) {
     }
   }, [modalOpen, productKeyword])
 
+  // 售后记录
   useEffect(() => {
     if (!modalOpen) return undefined
     const currentProductId = form.product_id
@@ -420,18 +428,17 @@ function TaskCenter({ targetSourceKey = null,targetTaskId=null }) {
     return () => document.removeEventListener('pointerdown', closeNativeDatePicker, true)
   }, [])
 
-  // 从工作台提醒进入任务中心时，清除旧筛选条件
-    useEffect(() => {
-      if (!targetSourceKey) return
+  // 从工作台提醒进入任务中心时清除旧筛选
+  // [FIX] targetTaskId 模式下不干预筛选，避免两套入口互相覆盖
+  useEffect(() => {
+    if (!targetSourceKey || targetTaskId != null) return
+    setPage(1)
+    setKeyword('')
+    setStatus('')
+    setPriority('')
+  }, [targetSourceKey, targetTaskId])
 
-      setPage(1)
-      setKeyword('')
-      setStatus('')
-      setPriority('')
-    }, [targetSourceKey])
-
-
-  // 更多操作菜单：点击菜单外部或按 ESC 时收起
+  // 更多操作菜单
   useEffect(() => {
     if (openActionMenuId === null) return undefined
 
@@ -452,59 +459,58 @@ function TaskCenter({ targetSourceKey = null,targetTaskId=null }) {
     }
   }, [openActionMenuId])
 
-  // 目标任务加载完成后，滚动到对应卡片
-    useEffect(() => {
-      if (!targetSourceKey || loading) return
+  // [FIX] 滚动到目标任务：修复语法错误、补齐 targetTaskId 依赖、改为按 data 属性查询
+  useEffect(() => {
+    if (loading) return
+    if (targetTaskId == null && !targetSourceKey) return
 
-      const targetTask = tasks.find(
-        (task) => (
-                      targetTaskId !== null &&
-                      Number(task.id) === Number(targetTaskId)
-                    ) || (
-                      targetSourceKey &&
-                      task.source_key === targetSourceKey
-                    )
-      )
-
-      if (targetTask) {
-        targetTaskRef.current?.scrollIntoView({
-          behavior: 'smooth',
-          block: 'center',
-        })
+    const targetTask = tasks.find((task) => {
+      if (targetTaskId != null) {
+        return Number(task.id) === Number(targetTaskId)
       }
-    }, [targetSourceKey, tasks, loading])
+      return task.source_key === targetSourceKey
+    })
+    if (!targetTask) return
 
-// 目标任务详情加载
-    useEffect(() => {
-          if (!targetTaskId) return
-          let cancelled = false
-          const loadTargetTask = async () => {
-            try {
-              setLoading(true)
-              const task = await taskApi.get(targetTaskId)
-              if (cancelled) return
+    const items = document.querySelectorAll('.task-item')
+    const el = Array.from(items).find((node) =>
+      targetTaskId != null
+        ? node.dataset.taskId === String(targetTaskId)
+        : node.dataset.sourceKey === targetSourceKey
+    )
+    el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }, [targetSourceKey, targetTaskId, tasks, loading])
 
-              setTasks([task])
-              setTotal(1)
-              setPage(1)
-            } catch (err) {
-              if (!cancelled) {
-                setError(err.message || '无法加载对应任务。')
-                setTasks([])
-                setTotal(0)
-              }
-            } finally {
-              if (!cancelled) {
-                setLoading(false)
-              }
-            }
-          }
-          loadTargetTask()
+  // [FIX] 单任务加载：补齐依赖、与列表请求互斥
+  useEffect(() => {
+    if (targetTaskId == null) return undefined
 
-          return () => {
-            cancelled = true
-          }
-        }, [targetTaskId])
+    let cancelled = false
+    const loadTargetTask = async () => {
+      setLoading(true)
+      setError('')
+      try {
+        const task = await taskApi.get(targetTaskId)
+        if (cancelled) return
+        setTasks(task ? [task] : [])
+        setTotal(task ? 1 : 0)
+        setPage(1)
+      } catch (err) {
+        if (!cancelled) {
+          setError(err.message || '无法加载对应任务。')
+          setTasks([])
+          setTotal(0)
+        }
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    loadTargetTask()
+
+    return () => {
+      cancelled = true
+    }
+  }, [targetTaskId])
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
@@ -621,13 +627,20 @@ function TaskCenter({ targetSourceKey = null,targetTaskId=null }) {
       if (editingTask) {
         await taskApi.update(editingTask.id, payload)
         setNotice('任务已更新。')
+        closeTaskModal()
+        await Promise.all([loadTasks(), loadTaskStats()])
       } else {
         await taskApi.create(payload)
         setNotice('任务已创建。')
-        setPage(1)
+        closeTaskModal()
+        // [FIX] 创建后回到第 1 页，用 pageOverride 避免 setPage 异步导致的旧页请求
+        if (page === 1) {
+          await Promise.all([loadTasks(1), loadTaskStats()])
+        } else {
+          setPage(1) // 触发 effect 自动加载第 1 页
+          await loadTaskStats()
+        }
       }
-      closeTaskModal()
-      await Promise.all([loadTasks(), loadTaskStats()])
     } catch (err) {
       const message = err.message || '保存任务失败。'
       const authStatus = [401, 403].includes(
@@ -664,7 +677,8 @@ function TaskCenter({ targetSourceKey = null,targetTaskId=null }) {
       closeCompletionModal()
       setNotice('任务已完成，处理结果已保存。')
       setCelebratingTaskId(completionTask.id)
-      window.setTimeout(() => setCelebratingTaskId(null), 320)
+      clearTimeout(celebrateTimer.current)
+      celebrateTimer.current = window.setTimeout(() => setCelebratingTaskId(null), 320)
       await Promise.all([loadTasks(), loadTaskStats()])
     } catch (err) {
       setError(err.message || '提交任务完成结果失败。')
@@ -707,6 +721,7 @@ function TaskCenter({ targetSourceKey = null,targetTaskId=null }) {
     }
   }
 
+  // [FIX] 失败时抛出，让 MorphConfirm 保持打开
   const changeStatus = async (task, nextStatus) => {
     setBusy(true)
     setError('')
@@ -719,11 +734,13 @@ function TaskCenter({ targetSourceKey = null,targetTaskId=null }) {
       await Promise.all([loadTasks(), loadTaskStats()])
     } catch (err) {
       setError(err.message || '状态更新失败。')
+      throw err
     } finally {
       setBusy(false)
     }
   }
 
+  // [FIX] 失败时抛出，让 MorphConfirm 保持打开
   const deleteTask = async (task) => {
     setBusy(true)
     setError('')
@@ -731,7 +748,7 @@ function TaskCenter({ targetSourceKey = null,targetTaskId=null }) {
     try {
       await taskApi.remove(task.id)
       setNotice('任务已删除。')
-      await loadTaskStats()  //刷新统计
+      await loadTaskStats()
       if (tasks.length === 1 && page > 1) {
         setPage((current) => current - 1)
       } else {
@@ -739,6 +756,7 @@ function TaskCenter({ targetSourceKey = null,targetTaskId=null }) {
       }
     } catch (err) {
       setError(err.message || '删除任务失败。')
+      throw err
     } finally {
       setBusy(false)
     }
@@ -751,14 +769,14 @@ function TaskCenter({ targetSourceKey = null,targetTaskId=null }) {
     setPage(1)
   }
 
-  /* 打开形变确认卡片 */
   const openMorph = (type, task, anchorEl) => {
     setOpenActionMenuId(null)
     if (type === 'edit') {
       openEdit(task, anchorEl)
       return
     }
-    const rect = anchorEl.getBoundingClientRect()
+    // [FIX] anchorEl 可能为空，补可选链
+    const rect = anchorEl?.getBoundingClientRect?.() ?? null
     const configs = {
       cancel: {
         title: '取消这个任务？',
@@ -780,12 +798,7 @@ function TaskCenter({ targetSourceKey = null,targetTaskId=null }) {
       },
     }
     const config = configs[type]
-    setMorph({
-      type,
-      task,
-      rect,
-      ...config,
-    })
+    setMorph({ type, task, rect, ...config })
   }
 
   const handleMorphConfirm = async () => {
@@ -855,7 +868,6 @@ function TaskCenter({ targetSourceKey = null,targetTaskId=null }) {
           <div>
             <div className="eyebrow">CURRENT PAGE</div>
             <h3>任务完成率</h3>
-{/*             <p>已完成任务占比</p> */}
           </div>
           <div
             className="task-donut"
@@ -959,23 +971,29 @@ function TaskCenter({ targetSourceKey = null,targetTaskId=null }) {
           <div className="task-empty">正在加载任务...</div>
         ) : tasks.length === 0 ? (
           <div className="task-empty">
-              <span>✳</span>
+            <span>✳</span>
 
-              {targetSourceKey ? (
-                <>
-                  <strong>暂未找到关联的系统任务</strong>
-                  <p>这条售后期限提醒暂时没有对应任务，请刷新后重试。</p>
-                </>
-              ) : (
-                <>
-                  <strong>这里还没有任务</strong>
-                  <p>创建一个任务，开始安排接下来的行动。</p>
-                  <button className="task-primary-btn" onClick={openCreate}>
-                    ＋ 创建第一个任务
-                  </button>
-                </>
-              )}
-            </div>
+            {targetTaskId != null ? (
+              // [FIX] 单任务模式加载失败/不存在时给出正确语义
+              <>
+                <strong>未找到对应的任务</strong>
+                <p>这条任务可能已被删除，或你没有权限查看。</p>
+              </>
+            ) : targetSourceKey ? (
+              <>
+                <strong>暂未找到关联的系统任务</strong>
+                <p>这条售后期限提醒暂时没有对应任务，请刷新后重试。</p>
+              </>
+            ) : (
+              <>
+                <strong>这里还没有任务</strong>
+                <p>创建一个任务，开始安排接下来的行动。</p>
+                <button className="task-primary-btn" onClick={openCreate}>
+                  ＋ 创建第一个任务
+                </button>
+              </>
+            )}
+          </div>
         ) : (
           tasks.map((task) => {
             const isCompleted = task.status === 'completed'
@@ -985,20 +1003,14 @@ function TaskCenter({ targetSourceKey = null,targetTaskId=null }) {
 
             return (
               <article
-                  ref={
-                    task.source_key === targetSourceKey
-                      ? targetTaskRef
-                      : null
-                  }
-                  className={`task-item ${
-                    isCompleted ? 'is-completed' : ''
-                  } ${
-                    task.source_key === targetSourceKey
-                      ? 'is-deadline-target'
-                      : ''
-                  }`}
-                  key={task.id}
-                >
+                // [FIX] 用 data 属性标记，滚动逻辑改用 querySelector，避免内联 ref 的清理问题
+                data-task-id={task.id}
+                data-source-key={task.source_key || ''}
+                className={`task-item ${isCompleted ? 'is-completed' : ''} ${
+                  task.source_key === targetSourceKey ? 'is-deadline-target' : ''
+                }`}
+                key={task.id}
+              >
                 <div className="task-item-main">
                   {canCheck && (
                     <button
@@ -1023,10 +1035,7 @@ function TaskCenter({ targetSourceKey = null,targetTaskId=null }) {
                         }[task.status]
                       }
                     >
-                      <span
-                        className="task-status-action-icon"
-                        aria-hidden="true"
-                      >
+                      <span className="task-status-action-icon" aria-hidden="true">
                         {task.status === 'pending' && '▶'}
                         {task.status === 'completed' && '✓'}
                       </span>
@@ -1074,7 +1083,6 @@ function TaskCenter({ targetSourceKey = null,targetTaskId=null }) {
                 </div>
 
                 <div className="task-item-actions-panel">
-                  {/* 高频操作保留在外层，低频操作收进“更多”菜单 */}
                   <button
                     type="button"
                     className="task-action-btn task-action-btn--edit task-action-btn--compact"
@@ -1115,11 +1123,7 @@ function TaskCenter({ targetSourceKey = null,targetTaskId=null }) {
                         )
                       }
                     >
-                      <svg
-                        viewBox="0 0 24 24"
-                        fill="currentColor"
-                        aria-hidden="true"
-                      >
+                      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                         <circle cx="5" cy="12" r="1.7" />
                         <circle cx="12" cy="12" r="1.7" />
                         <circle cx="19" cy="12" r="1.7" />
@@ -1297,6 +1301,31 @@ function TaskCenter({ targetSourceKey = null,targetTaskId=null }) {
                 </select>
               </label>
 
+              <div className="task-form-grid task-time-grid">
+                <label className="task-datetime-field">
+                  计划执行时间
+                  <input
+                    type="datetime-local"
+                    value={form.scheduled_at}
+                    onChange={(event) =>
+                      updateField('scheduled_at', event.target.value)
+                    }
+                  />
+                </label>
+
+                <label className="task-datetime-field">
+                  提醒时间
+                  <input
+                    type="datetime-local"
+                    value={form.reminder_at}
+                    max={form.scheduled_at || undefined}
+                    onChange={(event) =>
+                      updateField('reminder_at', event.target.value)
+                    }
+                  />
+                </label>
+              </div>
+
               <div className="task-form-grid">
                 <label>
                   关联商品（可选）
@@ -1384,11 +1413,7 @@ function TaskCenter({ targetSourceKey = null,targetTaskId=null }) {
             </div>
 
             <div className="task-modal-actions">
-              <button
-                type="button"
-                disabled={busy}
-                onClick={closeTaskModal}
-              >
+              <button type="button" disabled={busy} onClick={closeTaskModal}>
                 取消
               </button>
               <button className="task-primary-btn" disabled={busy}>
