@@ -8,12 +8,15 @@ from sqlalchemy.orm import Session
 
 from app.db.models import Product, AftercareRecord, Task
 from app.db.tasks.task_repository import TaskRepository
+from app.db.tasks.task_notification_repository import TaskNotificationRepository
 from app.schemas.task import TaskCreate, TaskUpdate
 
 class TaskService:
     def __init__(self,db:Session):
         self.db=db
         self.repository=TaskRepository(db)
+        # 保证任务更新和通知失效处于同一事务
+        self.notification_repository=TaskNotificationRepository(db)
 
     def _validate_relations(
             self,
@@ -205,7 +208,26 @@ class TaskService:
         elif new_status in {"pending", "in_progress", "cancelled"}:
             update_data["completed_at"] = None
 
-        return self.repository.update(task, update_data)
+        old_reminder_at = task.reminder_at
+
+        updated_task = self.repository.update(task, update_data)
+
+        reminder_changed = (
+                "reminder_at" in update_data
+                and old_reminder_at != updated_task.reminder_at
+        )
+
+        task_no_longer_active = updated_task.status in {
+            "completed",
+            "cancelled",
+        }
+
+        if reminder_changed or task_no_longer_active:
+            self.notification_repository.dismiss_unread_by_task(
+                task_id=updated_task.id
+            )
+
+        return updated_task
 
     def delete_task(self, task_id: int, user_id: int) -> None:
         """删除当前用户的任务。"""

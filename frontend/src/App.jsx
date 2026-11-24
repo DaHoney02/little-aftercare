@@ -114,24 +114,37 @@ function App() {
         upcoming: Array.isArray(deadlineData?.upcoming) ? deadlineData.upcoming : [],
         overdue: Array.isArray(deadlineData?.overdue) ? deadlineData.overdue : [],
       })
-//   两种通知合并到一个状态中
-      setNotifications([
-          ...notificationData.map((item)=>({
-              ...item,
-              notification_type:'aftercare',
-          })),
-          ...taskNotificationData.map((item)=>({
-              ...item,
-              notification_type:'task',
-          }))
-      ])
+    //   两种通知合并到一个状态中
+    // 1. 合并售后通知和任务通知
+    const mergedNotifications = [
+      ...(Array.isArray(notificationData) ? notificationData : []).map((item) => ({
+        ...item,
+        notification_type: 'aftercare',
+      })),
+
+      ...(Array.isArray(taskNotificationData) ? taskNotificationData : []).map((item) => ({
+        ...item,
+        notification_type: 'task',
+      })),
+    ]
+
+    // 2. 按创建时间倒序排列，最新通知显示在最前面
+    mergedNotifications.sort((a, b) => {
+      const timeA = new Date(a.created_at).getTime()
+      const timeB = new Date(b.created_at).getTime()
+
+      return timeB - timeA
+    })
+
+    // 3. 更新通知状态
+    setNotifications(mergedNotifications)
     } catch (err) {
       setError(getErrorMessage(err, '暂时无法连接服务，请确认后端已启动。'))
     } finally {
       setLoading(false)
     }
   }, [])
-
+// 登录状态加载
   useEffect(() => {
     if (!authLoading && user) {
       loadData(true)
@@ -139,6 +152,19 @@ function App() {
       setLoading(false)
     }
   }, [authLoading, user, loadData])
+
+    // 用户保持登录时，每 60 秒刷新一次通知和工作台数据
+    useEffect(() => {
+      if (authLoading || !user) {
+        return
+      }
+      const timer = window.setInterval(() => {
+        loadData(false)
+      }, 60 * 1000)
+      return () => {
+        window.clearInterval(timer)
+      }
+    }, [authLoading, user, loadData])
 
   // 输入停止 300ms 后再更新关键词，避免每次按键都触发列表计算。
   useEffect(() => {
@@ -933,13 +959,13 @@ function NotificationModal({ notifications, onClose, onMarkRead, onOpenNotificat
       ) : (
         <div className="notification-list notification-modal-list">
           {notifications.map((item) => (
-            <article className={`notification-card ${item.status}`} key={item.id}>
+            <article className={`notification-card ${item.status}`} key={`${item.notification_type}-${item.id}`}>
               <div className="notification-mark">{item.deadline_type === 'return' ? '退' : '保'}</div>
               <button type="button" className="notification-content notification-record-link" onClick={() => onOpenNotification(item)}>
                 <strong>{item.notification_type === 'task' ? '任务提醒' : item.deadline_type==='return' ? '退货期限提醒' :'保修期限提醒'}</strong>
                 {item.notification_type==='task' ? (
                     <>
-                        <p>任务 #{item.task_id}</p>
+                        <p>{item.task_title || `任务 #${item.task_id}`}</p>
                         <small>提醒时间{dateTimeText(item.reminder_at)}</small>
                     </>
                 ):(

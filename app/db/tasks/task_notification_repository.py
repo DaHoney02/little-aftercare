@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import Task, TaskNotificationRecord
 
+
 class TaskNotificationRepository:
     """任务通知数据库操作层。"""
 
@@ -45,12 +46,22 @@ class TaskNotificationRepository:
         limit: int = 50,
         offset: int = 0,
         unread_only: bool = False,
-    ) -> list[TaskNotificationRecord]:
-        """查询当前用户的任务通知。"""
+    ) -> list[dict]:
+        """查询当前用户的有效任务通知，并返回关联任务标题。"""
 
-        statement = select(TaskNotificationRecord).where(
-            TaskNotificationRecord.user_id == user_id
-        )
+        statement = (
+            select(
+                TaskNotificationRecord,
+                Task.title.label("task_title")
+            )
+            .outerjoin(
+                Task,
+                TaskNotificationRecord.task_id==Task.id,
+            )
+            .where(
+                TaskNotificationRecord.user_id == user_id,
+                TaskNotificationRecord.status != "dismissed"
+            ))
 
         if unread_only:
             statement = statement.where(
@@ -96,3 +107,23 @@ class TaskNotificationRepository:
         )
 
         return list(self.db.scalars(statement).all())
+
+    def dismiss_unread_by_task(self, task_id: int) -> int:
+        """
+        将指定任务的所有未读通知标记为失效。
+
+        不删除通知记录，保留历史数据。
+        只处理 unread，不影响已经 read 的通知。
+        """
+        from sqlalchemy import update
+
+        statement = (
+            update(TaskNotificationRecord)  #批量更新
+            .where(
+                TaskNotificationRecord.task_id == task_id,
+                TaskNotificationRecord.status == "unread",
+            )
+            .values(status="dismissed")
+        )
+        result = self.db.execute(statement)
+        return result.rowcount or 0

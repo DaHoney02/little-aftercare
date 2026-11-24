@@ -606,7 +606,7 @@ class TaskNotificationRecord(Base):
         nullable=False
     )
 
-    # 通知状态：unread / read
+    # 通知状态：unread / read/dismissed
     status: Mapped[str] = mapped_column(
         String(20),
         nullable=False,

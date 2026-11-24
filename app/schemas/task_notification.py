@@ -11,6 +11,7 @@ class TaskNotificationResponse(BaseModel):
 
     id: int
     task_id: int
+    task_title: str |None=None
     reminder_at: datetime
-    status: Literal["unread", "read"]
+    status: Literal["unread", "read","dismissed"]
     created_at: datetime
