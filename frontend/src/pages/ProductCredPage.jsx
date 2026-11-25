@@ -3,7 +3,8 @@ import {
   getProductCredentials,
   uploadProductCredential,
   deleteProductCredential,
-  getProductCredentialFile
+  getProductCredentialFile,
+  updateCredentialProduct
 } from '../api/productCred.js'
 import { getProductList } from '../api/product.js'
 import '../styles/product-cred.css'
@@ -68,6 +69,12 @@ export default function ProductCredentialsPage() {
   const [showUploadModal, setShowUploadModal] = useState(false)
   const [selectedFile, setSelectedFile] = useState(null)
   const [uploadProductId, setUploadProductId] = useState('')
+  // 当前正在编辑关联商品的凭证 ID
+  const [editingProductId, setEditingProductId] = useState(null)
+    // 编辑时选择的商品 ID
+  const [editingProductValue, setEditingProductValue] = useState('')
+    // 正在提交关联修改的凭证 ID
+  const [savingProductId, setSavingProductId] = useState(null)
 
   const [previewCredential, setPreviewCredential] = useState(null)
   const [previewUrl, setPreviewUrl] = useState('')
@@ -360,6 +367,71 @@ export default function ProductCredentialsPage() {
     }
   }
 
+  // 开始编辑凭证关联商品
+    function handleStartEditProduct(credential) {
+      setEditingProductId(credential.id)
+
+      setEditingProductValue(
+        credential.product_id === null ||
+        credential.product_id === undefined
+          ? ''
+          : String(credential.product_id)
+      )
+
+      setError('')
+      setNotice('')
+    }
+
+    // 取消编辑关联商品
+    function handleCancelEditProduct() {
+      setEditingProductId(null)
+      setEditingProductValue('')
+    }
+
+    // 保存凭证关联商品
+    async function handleSaveProduct(credential) {
+      if (savingProductId !== null) return
+
+      const productId = editingProductValue
+        ? Number(editingProductValue)
+        : null
+
+      // 前端基础校验
+      if (
+        productId !== null &&
+        (!Number.isInteger(productId) || productId <= 0)
+      ) {
+        setError('请选择有效的商品')
+        return
+      }
+
+      setSavingProductId(credential.id)
+      setError('')
+      setNotice('')
+
+      try {
+        await updateCredentialProduct(
+          credential.id,
+          productId
+        )
+
+        setNotice(
+          productId === null
+            ? '已解除凭证与商品的关联'
+            : '凭证关联商品已更新'
+        )
+
+        handleCancelEditProduct()
+
+        // 重新请求后端，使用数据库中的最新关联状态
+        await loadCredentials()
+      } catch (err) {
+        setError(err.message || '修改关联商品失败')
+      } finally {
+        setSavingProductId(null)
+      }
+    }
+
   // 通过商品 ID 查找商品名称
   function getProductName(productId) {
     if (productId === null || productId === undefined) {
@@ -539,9 +611,56 @@ export default function ProductCredentialsPage() {
                     <span>{formatFileSize(credential.file_size)}</span>
                     <span>{formatDate(credential.created_at)}</span>
                   </div>
-                  <div className="credential-product">
-                    关联商品：{getProductName(credential.product_id)}
-                  </div>
+                  {editingProductId === credential.id ? (
+                      <div className="credential-product-editor">
+                        <select
+                          value={editingProductValue}
+                          onChange={(event) => {
+                            setEditingProductValue(event.target.value)
+                          }}
+                          disabled={savingProductId === credential.id}
+                          aria-label="选择关联商品"
+                        >
+                          <option value="">暂不关联商品</option>
+
+                          {products.map((product) => (
+                            <option key={product.id} value={product.id}>
+                              {product.name}
+                            </option>
+                          ))}
+                        </select>
+
+                        <button
+                          type="button"
+                          disabled={savingProductId === credential.id}
+                          onClick={() => handleSaveProduct(credential)}
+                        >
+                          {savingProductId === credential.id ? '保存中...' : '保存'}
+                        </button>
+
+                        <button
+                          type="button"
+                          disabled={savingProductId === credential.id}
+                          onClick={handleCancelEditProduct}
+                        >
+                          取消
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="credential-product credential-product-row">
+                        <span>
+                          关联商品：{getProductName(credential.product_id)}
+                        </span>
+
+                        <button
+                          type="button"
+                          className="credential-link-edit"
+                          onClick={() => handleStartEditProduct(credential)}
+                        >
+                          编辑关联
+                        </button>
+                      </div>
+                  )}
                 </div>
 
                 <div className="credential-actions">

@@ -3,7 +3,12 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from app.schemas.aftercare import AftercareResponse
 from app.schemas.common_schema import PageResponse
+from app.schemas.product_cred_schema import ProductCredResponse
+from app.schemas.task import TaskResponse
+
 
 def validate_product_name(value: str | None) -> str:
     """商品名称不能为空，也不能只包含空格。"""
@@ -79,3 +84,23 @@ class ProductResponse(BaseModel):
 class ProductPageResponse(PageResponse[ProductResponse]):
     """商品分页列表响应模型。"""
     pass
+
+class ProductDetailResponse(ProductResponse):
+    """商品详情聚合响应。
+
+    在商品基础信息上，增加关联的售后记录、购物凭证和任务。
+    """
+    aftercare_records: list[AftercareResponse] = Field(
+        default_factory=list,
+        description="该商品关联的售后记录",
+    )
+
+    credentials: list[ProductCredResponse] = Field(
+        default_factory=list,
+        description="该商品关联的购物凭证",
+    )
+
+    tasks: list[TaskResponse] = Field(
+        default_factory=list,
+        description="该商品关联的任务",
+    )

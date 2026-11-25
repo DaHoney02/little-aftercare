@@ -683,3 +683,124 @@
   opacity: .6;
   cursor: not-allowed;
 }
+
+/* =================================
+   商品详情：关联数据区域
+================================= */
+
+.products-detail-modal {
+  width: min(760px, 100%);
+}
+
+.products-detail-section {
+  margin-top: 23px;
+}
+
+.products-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #edf0eb;
+}
+
+.products-section-heading h4 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.products-section-heading > span {
+  color: #89958b;
+  font-size: 12px;
+}
+
+.products-related-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.products-related-card {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px;
+  border: 1px solid #edf0eb;
+  border-radius: 11px;
+  background: #fbfcfa;
+  transition:
+    border-color .2s ease,
+    background .2s ease,
+    transform .2s ease;
+}
+
+.products-related-card:hover {
+  transform: translateY(-1px);
+  border-color: #dce8dc;
+  background: #f7faf6;
+}
+
+.products-related-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.products-related-main > strong {
+  color: #3e4d42;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.products-related-main > p {
+  margin: 8px 0 0;
+  color: #849087;
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.products-related-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px 14px;
+  margin-top: 9px;
+}
+
+.products-related-meta span {
+  color: #879288;
+  font-size: 12px;
+}
+
+.products-related-status {
+  flex-shrink: 0;
+  padding: 5px 9px;
+  border-radius: 20px;
+  background: #edf4ed;
+  color: #64836a;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.products-related-empty {
+  padding: 22px 12px;
+  border: 1px dashed #e2e8e1;
+  border-radius: 10px;
+  color: #9aa49b;
+  font-size: 13px;
+  text-align: center;
+}
+
+@media (max-width: 700px) {
+  .products-related-card {
+    flex-direction: column;
+  }
+
+  .products-related-status {
+    align-self: flex-start;
+  }
+}

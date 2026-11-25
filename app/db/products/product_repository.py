@@ -2,7 +2,7 @@
 from sqlalchemy import select, func, or_, asc, desc
 from sqlalchemy.orm import Session
 
-from app.db.models import Product
+from app.db.models import Product, Task, ProductCred, AftercareRecord
 from app.schemas.product import ProductCreate, ProductUpdate
 
 
@@ -66,8 +66,66 @@ def get_product(
     user_id: int
 ) -> Product | None:
     """查询商品详情。"""
-
     return _get_owned(db, product_id, user_id)
+
+def list_product_aftercare_records(
+    db: Session,
+    product_id: int,
+    user_id: int,
+) -> list[AftercareRecord]:
+    """查询商品关联的售后记录。"""
+
+    statement = (
+        select(AftercareRecord)
+        .where(
+            AftercareRecord.product_id == product_id,
+            AftercareRecord.user_id == user_id,
+        )
+        .order_by(AftercareRecord.created_at.desc())
+    )
+
+    return list(db.scalars(statement).all())
+
+
+def list_product_credentials(
+    db: Session,
+    product_id: int,
+    user_id: int,
+) -> list[ProductCred]:
+    """查询商品关联的购物凭证。"""
+
+    statement = (
+        select(ProductCred)
+        .where(
+            ProductCred.product_id == product_id,
+            ProductCred.user_id == user_id,
+        )
+        .order_by(ProductCred.created_at.desc())
+    )
+
+    return list(db.scalars(statement).all())
+
+
+def list_product_tasks(
+    db: Session,
+    product_id: int,
+    user_id: int,
+) -> list[Task]:
+    """查询商品关联的任务。"""
+
+    statement = (
+        select(Task)
+        .where(
+            Task.product_id == product_id,
+            Task.user_id == user_id,
+        )
+        .order_by(
+            Task.scheduled_at.asc().nullslast(),
+            Task.created_at.desc(),
+        )
+    )
+
+    return list(db.scalars(statement).all())
 
 def list_products(
     db: Session,

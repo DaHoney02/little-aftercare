@@ -10,7 +10,7 @@ class ProductCredRepository:
             db:Session,
             *,
             user_id:int,
-            product_id:int,
+            product_id:int | None,
             file_name:str,
             storage_name:str,
             storage_path:str,
@@ -67,6 +67,23 @@ class ProductCredRepository:
         return query.order_by(
             ProductCred.created_at.desc()
         ).all()
+
+    @staticmethod
+    def update_product(
+            db: Session,
+            credential: ProductCred,
+            product_id: int | None,
+    ) -> ProductCred:
+        """修改凭证关联的商品。
+
+        product_id:
+        - 正整数：关联指定商品
+        - None：解除商品关联
+        """
+        credential.product_id = product_id
+        db.flush()
+
+        return credential
 
     @staticmethod
     def delete(

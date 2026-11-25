@@ -53,6 +53,19 @@ function formatDate(value, includeTime = false) {
   return new Intl.DateTimeFormat('zh-CN', options).format(date)
 }
 
+function formatFileSize(bytes) {
+  if (bytes === null || bytes === undefined) {
+    return '未知大小'
+  }
+
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) {
+    return `${(bytes / 1024).toFixed(1)} KB`
+  }
+
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
 // 金额显示。
 function formatPrice(value) {
   if (value === null || value === undefined || value === '') {
@@ -67,8 +80,40 @@ function getCategoryLabel(category) {
   if (!category) {
     return '未分类'
   }
-
   return category
+}
+
+// 售后记录状态
+function getAftercareStatusLabel(status) {
+  const labels = {
+    pending: '待处理',
+    processing: '处理中',
+    completed: '已完成',
+    cancelled: '已取消',
+  }
+
+  return labels[status] || status || '未知状态'
+}
+
+// 任务状态
+function getTaskStatusLabel(status) {
+  const labels = {
+    pending: '待开始',
+    in_progress: '进行中',
+    completed: '已完成',
+    cancelled: '已取消',
+  }
+  return labels[status] || status || '未知状态'
+}
+// 任务优先级
+function getTaskPriorityLabel(priority) {
+  const labels = {
+    low: '低',
+    medium: '普通',
+    high: '高',
+    urgent: '紧急',
+  }
+  return labels[priority] || priority || '普通'
 }
 
 export default function ProductsPage() {
@@ -723,76 +768,230 @@ export default function ProductsPage() {
       )}
 
       {/* 商品详情弹窗 */}
-      {detailProduct && (
-        <div className="products-modal-backdrop" onClick={() => setDetailProduct(null)}>
+        {detailProduct && (
           <div
-            className="products-modal products-detail-modal"
-            onClick={(event) => event.stopPropagation()}
+            className="products-modal-backdrop"
+            onClick={() => setDetailProduct(null)}
           >
-            <div className="products-modal-heading">
-              <div>
-                <div className="eyebrow">PRODUCT DETAILS</div>
-                <h3>{detailProduct.name}</h3>
+            <div
+              className="products-modal products-detail-modal"
+              onClick={(event) => event.stopPropagation()}
+            >
+              {/* 弹窗标题 */}
+              <div className="products-modal-heading">
+                <div>
+                  <div className="eyebrow">PRODUCT DETAILS</div>
+                  <h3>{detailProduct.name}</h3>
+                </div>
+
+                <button
+                  type="button"
+                  className="icon-button"
+                  onClick={() => setDetailProduct(null)}
+                >
+                  ×
+                </button>
               </div>
 
-              <button
-                type="button"
-                className="icon-button"
-                onClick={() => setDetailProduct(null)}
-              >
-                ×
-              </button>
-            </div>
+              {/* 商品基础信息 */}
+              <section className="products-detail-section">
+                <div className="products-section-heading">
+                  <h4>商品信息</h4>
+                  <span>PRODUCT</span>
+                </div>
 
-            <div className="products-detail-grid">
-              <div>
-                <span>品牌</span>
-                <strong>{detailProduct.brand || '未填写'}</strong>
-              </div>
+                <div className="products-detail-grid">
+                  <div>
+                    <span>品牌</span>
+                    <strong>{detailProduct.brand || '未填写'}</strong>
+                  </div>
 
-              <div>
-                <span>型号</span>
-                <strong>{detailProduct.model || '未填写'}</strong>
-              </div>
+                  <div>
+                    <span>型号</span>
+                    <strong>{detailProduct.model || '未填写'}</strong>
+                  </div>
 
-              <div>
-                <span>分类</span>
-                <strong>{detailProduct.category || '未分类'}</strong>
-              </div>
+                  <div>
+                    <span>分类</span>
+                    <strong>{detailProduct.category || '未分类'}</strong>
+                  </div>
 
-              <div>
-                <span>购买价格</span>
-                <strong>{formatPrice(detailProduct.purchase_price)}</strong>
-              </div>
+                  <div>
+                    <span>购买价格</span>
+                    <strong>{formatPrice(detailProduct.purchase_price)}</strong>
+                  </div>
 
-              <div>
-                <span>购买日期</span>
-                <strong>{formatDate(detailProduct.purchase_date)}</strong>
-              </div>
+                  <div>
+                    <span>购买日期</span>
+                    <strong>{formatDate(detailProduct.purchase_date)}</strong>
+                  </div>
 
-              <div>
-                <span>购买渠道</span>
-                <strong>{detailProduct.purchase_channel || '未填写'}</strong>
-              </div>
+                  <div>
+                    <span>购买渠道</span>
+                    <strong>{detailProduct.purchase_channel || '未填写'}</strong>
+                  </div>
 
-              <div className="products-detail-full">
-                <span>商品描述</span>
-                <p>{detailProduct.description || '暂无描述'}</p>
-              </div>
+                  <div className="products-detail-full">
+                    <span>商品描述</span>
+                    <p>{detailProduct.description || '暂无描述'}</p>
+                  </div>
 
-              <div>
-                <span>创建时间</span>
-                <strong>{formatDate(detailProduct.created_at, true)}</strong>
-              </div>
+                  <div>
+                    <span>创建时间</span>
+                    <strong>{formatDate(detailProduct.created_at, true)}</strong>
+                  </div>
 
-              <div>
-                <span>更新时间</span>
-                <strong>{formatDate(detailProduct.updated_at, true)}</strong>
-              </div>
+                  <div>
+                    <span>更新时间</span>
+                    <strong>{formatDate(detailProduct.updated_at, true)}</strong>
+                  </div>
+                </div>
+              </section>
+
+              {/* 售后记录 */}
+              <section className="products-detail-section">
+                <div className="products-section-heading">
+                  <h4>售后记录</h4>
+                  <span>
+                    {(detailProduct.aftercare_records || []).length} 条记录
+                  </span>
+                </div>
+
+                {(detailProduct.aftercare_records || []).length === 0 ? (
+                  <div className="products-related-empty">
+                    暂无关联售后记录
+                  </div>
+                ) : (
+                  <div className="products-related-list">
+                    {detailProduct.aftercare_records.map((record) => (
+                      <article
+                        className="products-related-card"
+                        key={record.id}
+                      >
+                        <div className="products-related-main">
+                          <strong>{record.title}</strong>
+
+                          <div className="products-related-meta">
+                            <span>平台：{record.platform || '未填写'}</span>
+                            <span>
+                              购买日期：{formatDate(record.purchase_date)}
+                            </span>
+                            <span>
+                              退货截止：{formatDate(record.return_deadline)}
+                            </span>
+                            <span>
+                              保修截止：{formatDate(record.warranty_deadline)}
+                            </span>
+                          </div>
+
+                          {record.notes && (
+                            <p>{record.notes}</p>
+                          )}
+                        </div>
+
+                        <span className="products-related-status">
+                          {getAftercareStatusLabel(record.status)}
+                        </span>
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              {/* 购物凭证 */}
+              <section className="products-detail-section">
+                <div className="products-section-heading">
+                  <h4>购物凭证</h4>
+                  <span>
+                    {(detailProduct.credentials || []).length} 份凭证
+                  </span>
+                </div>
+
+                {(detailProduct.credentials || []).length === 0 ? (
+                  <div className="products-related-empty">
+                    暂无关联购物凭证
+                  </div>
+                ) : (
+                  <div className="products-related-list">
+                    {detailProduct.credentials.map((credential) => (
+                      <article
+                        className="products-related-card"
+                        key={credential.id}
+                      >
+                        <div className="products-related-main">
+                          <strong>{credential.file_name}</strong>
+
+                          <div className="products-related-meta">
+                            <span>
+                              类型：{credential.content_type || '未知'}
+                            </span>
+                            <span>
+                              大小：{formatFileSize(
+                                credential.file_size
+                              )}
+                            </span>
+                            <span>
+                              上传时间：{formatDate(credential.created_at, true)}
+                            </span>
+                          </div>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              {/* 关联任务 */}
+              <section className="products-detail-section">
+                <div className="products-section-heading">
+                  <h4>关联任务</h4>
+                  <span>
+                    {(detailProduct.tasks || []).length} 项任务
+                  </span>
+                </div>
+
+                {(detailProduct.tasks || []).length === 0 ? (
+                  <div className="products-related-empty">
+                    暂无关联任务
+                  </div>
+                ) : (
+                  <div className="products-related-list">
+                    {detailProduct.tasks.map((task) => (
+                      <article
+                        className="products-related-card"
+                        key={task.id}
+                      >
+                        <div className="products-related-main">
+                          <strong>{task.title}</strong>
+
+                          {task.description && (
+                            <p>{task.description}</p>
+                          )}
+
+                          <div className="products-related-meta">
+                            <span>
+                              计划时间：{formatDate(task.scheduled_at, true)}
+                            </span>
+                            <span>
+                              提醒时间：{formatDate(task.reminder_at, true)}
+                            </span>
+                            <span>
+                              优先级：{getTaskPriorityLabel(task.priority)}
+                            </span>
+                          </div>
+                        </div>
+
+                        <span className="products-related-status">
+                          {getTaskStatusLabel(task.status)}
+                        </span>
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </section>
             </div>
           </div>
-        </div>
-      )}
+        )}
     </section>
   )
 }

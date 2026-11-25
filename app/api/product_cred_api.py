@@ -1,5 +1,6 @@
 
 from fastapi import APIRouter, status, UploadFile, File, Form, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from pathlib import  Path
 
@@ -15,6 +16,15 @@ router=APIRouter(
     prefix="/product-cred",
     tags=["商品凭证"]
 )
+
+class ProductCredLinkRequest(BaseModel):
+    """修改购物凭证关联商品的请求。"""
+
+    product_id: int | None = Field(
+        default=None,
+        ge=1,
+        description="商品 ID；传 null 表示解除关联",
+    )
 
 @router.post(
     "",
@@ -92,6 +102,59 @@ def list_product_cred(
         current_user.id,
         product_id
     )
+
+@router.patch(
+    "/{credential_id}/product",
+    response_model=ProductCredResponse,
+    summary="修改购物凭证关联的商品",
+)
+def update_product_cred_product(
+    credential_id: int,
+    data: ProductCredLinkRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """关联或解除购物凭证与商品之间的关系。"""
+
+    # 1. 查询当前用户自己的凭证
+    credential = ProductCredRepository.get_by_id(
+        db,
+        credential_id,
+        current_user.id,
+    )
+    if credential is None:
+        raise HTTPException(
+            status_code=404,
+            detail="凭证不存在",
+        )
+    # 2. 如果传入商品 ID，验证商品归属
+    if data.product_id is not None:
+        exists = ProductCredRepository.owned_product_exists(
+            db,
+            data.product_id,
+            current_user.id,
+        )
+        if not exists:
+            raise HTTPException(
+                status_code=404,
+                detail="商品不存在",
+            )
+    # 3. 修改关联关系
+    try:
+        updated = ProductCredRepository.update_product(
+            db=db,
+            credential=credential,
+            product_id=data.product_id,
+        )
+
+        db.commit()
+        db.refresh(updated)
+
+        return updated
+
+    except Exception:
+        db.rollback()
+        raise
 
 @router.delete(
     "/{credential_id}",

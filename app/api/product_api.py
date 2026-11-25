@@ -7,8 +7,23 @@ from sqlalchemy.orm import Session
 from app.core.dependencies import get_current_user
 from app.db.database import get_db
 from app.db.models import Product, User
-from app.db.products.product_repository import create_product, list_products, get_product, update_product, delete_product
-from app.schemas.product import ProductResponse, ProductCreate, ProductPageResponse, ProductUpdate
+from app.db.products.product_repository import (
+    create_product,
+    list_products,
+    get_product,
+    update_product,
+    delete_product,
+    list_product_aftercare_records,
+    list_product_credentials,
+    list_product_tasks,
+)
+from app.schemas.product import (
+    ProductResponse,
+    ProductCreate,
+    ProductPageResponse,
+    ProductUpdate,
+    ProductDetailResponse,
+)
 from app.utils.pagination import calculate_total_pages
 
 router=APIRouter(
@@ -81,20 +96,62 @@ def list_product_api(
 
 @router.get(
     "/{product_id}",
-    response_model=ProductResponse,
-    summary="查询商品详情"
+    response_model=ProductDetailResponse,
+    summary="查询商品详情及关联数据",
 )
 def get_product_detail(
-        product_id:int,
-        db:Session=Depends(get_db),
-        current_user:User=Depends(get_current_user)
-)->Product:
-    return _or_404(
+    product_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """查询商品基础信息及关联的售后、凭证和任务。"""
+
+    # 1. 先确认商品属于当前登录用户
+    product = _or_404(
         get_product(
-        db=db,
-        product_id=product_id,
-        user_id=current_user.id
-    ))
+            db=db,
+            product_id=product_id,
+            user_id=current_user.id,
+        )
+    )
+
+    # 2. 查询商品关联的业务数据
+    aftercare_records = list_product_aftercare_records(
+        db,
+        product_id,
+        current_user.id,
+    )
+
+    credentials = list_product_credentials(
+        db,
+        product_id,
+        current_user.id,
+    )
+
+    tasks = list_product_tasks(
+        db,
+        product_id,
+        current_user.id,
+    )
+
+    # 3. 组装聚合响应
+    return {
+        "id": product.id,
+        "user_id": product.user_id,
+        "name": product.name,
+        "brand": product.brand,
+        "model": product.model,
+        "category": product.category,
+        "purchase_price": product.purchase_price,
+        "purchase_date": product.purchase_date,
+        "purchase_channel": product.purchase_channel,
+        "description": product.description,
+        "created_at": product.created_at,
+        "updated_at": product.updated_at,
+        "aftercare_records": aftercare_records,
+        "credentials": credentials,
+        "tasks": tasks,
+    }
 
 @router.patch("/{product_id}", response_model=ProductResponse, summary="局部更新商品档案")
 def update_product_api(

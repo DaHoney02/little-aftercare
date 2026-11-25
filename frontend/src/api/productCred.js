@@ -39,3 +39,19 @@ export function getProductCredentialFile(credentialId, disposition = 'inline') {
     { responseType: 'blob' }
   )
 }
+
+/**
+ * 修改购物凭证关联的商品。
+ *
+ * productId:
+ * - 传入商品 ID：关联或更换商品
+ * - 传入 null：解除商品关联
+ */
+export function updateCredentialProduct(credentialId, productId) {
+  return request(`/product-cred/${credentialId}/product`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      product_id: productId,
+    }),
+  })
+}
