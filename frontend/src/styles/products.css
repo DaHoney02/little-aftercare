@@ -1,11 +1,22 @@
-
 /* ================================
    商品档案页面
 ================================ */
 
 .products-page {
   width: 100%;
-  animation: fade-up .3s ease both;
+  /*
+   * 原为 animation: fade-up .3s ease both;
+   * fade-up 含 translateY，配合 fill-mode: both 会把 transform 永久留在元素上，
+   * 使内部 position: fixed 的元素以本元素为包含块。
+   * 弹窗现已改为 Portal 渲染到 body，但这里仍保持无 transform，
+   * 避免任何后加入的 fixed 元素再次被囚禁。
+   */
+  animation: products-page-in 0.3s ease both;
+}
+
+@keyframes products-page-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 
 .products-heading {
@@ -67,7 +78,8 @@
 /* 商品统计 */
 .products-summary {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  /* 原为 repeat(2, 1fr)，但模板只渲染一个卡片，右侧永远空一半 */
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 14px;
   margin-bottom: 16px;
 }
@@ -379,31 +391,71 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  overflow-y: auto;
+  overflow: hidden;
   padding: 24px;
-  background: rgba(30, 43, 34, .38);
+  background: rgba(29, 44, 36, .42);
   backdrop-filter: blur(3px);
 }
 
+/*
+ * 与任务中心新增任务弹窗统一的三段式结构：
+ * 标题固定 → 中部滚动 → 底部操作固定。
+ * 弹窗自身不滚动，只由 .products-modal-body 承担滚动。
+ */
 .products-modal {
-  width: min(680px, 100%);
-  max-height: calc(100vh - 48px);
-  overflow-y: auto;
-  padding: 24px;
-  border: 1px solid #e7ece6;
-  border-radius: 17px;
+  display: flex;
+  flex-direction: column;
+  width: min(560px, 100%);
+  max-height: min(92dvh, 900px);
+  min-height: 0;
+  overflow: hidden;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, .7);
+  border-radius: var(--radius-lg, 16px);
   background: #fff;
-  box-shadow: 0 22px 70px rgba(28, 50, 34, .2);
-  animation: fade-up .25s ease both;
+  box-shadow: var(--shadow-modal, 0 25px 80px rgba(21, 37, 28, .20));
 }
 
+/* 首段：标题栏固定，不参与滚动 */
 .products-modal-heading {
+  position: relative;
+  z-index: 3;
   display: flex;
+  flex: 0 0 auto;
   align-items: flex-start;
   justify-content: space-between;
   gap: 15px;
-  margin-bottom: 20px;
+  margin: 0;
+  padding: 22px 24px 18px;
+  border-bottom: 1px solid #edf1ec;
+  background: #fff;
 }
+
+/* 表单容器：撑满剩余高度，让内部 body 成为唯一滚动区 */
+.products-modal-form {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  flex-direction: column;
+}
+
+/* 中段：唯一滚动区域 */
+.products-modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 20px 24px 8px;
+}
+
+.products-modal-body::-webkit-scrollbar { width: 8px; }
+.products-modal-body::-webkit-scrollbar-thumb {
+  border: 2px solid #fff;
+  border-radius: 8px;
+  background: #cbd8cc;
+}
+.products-modal-body::-webkit-scrollbar-thumb:hover { background: #aebfaf; }
 
 .products-modal-heading h3 {
   margin: 5px 0 0;
@@ -464,6 +516,15 @@
   justify-content: flex-end;
   gap: 9px;
   margin-top: 22px;
+}
+
+/* 尾段：底部操作区固定，不随内容滚动 */
+.products-modal-form .products-modal-actions {
+  flex: 0 0 auto;
+  margin-top: 0;
+  padding: 14px 24px 20px;
+  border-top: 1px solid #eff2ed;
+  background: #fff;
 }
 
 /* 商品详情 */
@@ -632,7 +693,6 @@
   background: #fff;
   text-align: center;
   box-shadow: 0 22px 70px rgba(28, 50, 34, .2);
-  animation: fade-up .25s ease both;
 }
 
 .products-confirm-icon {
@@ -804,3 +864,638 @@
     align-self: flex-start;
   }
 }
+
+
+/* 统一商品档案页的微交互与状态层次 */
+.products-summary > div,
+.products-list,
+.product-card,
+.products-related-card,
+.products-modal,
+.products-confirm-modal {
+  transition: border-color .18s ease, box-shadow .18s ease, background-color .18s ease;
+}
+
+.products-summary > div:hover {
+  transform: translateY(-2px);
+  border-color: #d9e6da;
+  box-shadow: 0 8px 22px rgba(43, 69, 48, .07);
+}
+
+.product-card:hover {
+  transform: translateY(-1px);
+  box-shadow: inset 3px 0 0 #91b39a;
+}
+
+.products-page button:focus-visible,
+.products-page input:focus-visible,
+.products-page select:focus-visible,
+.products-page textarea:focus-visible {
+  outline: 3px solid rgba(104, 151, 115, .2);
+  outline-offset: 2px;
+}
+
+.products-page button:not(:disabled) {
+  transition: transform .16s ease, background-color .16s ease, border-color .16s ease, box-shadow .16s ease;
+}
+
+.products-page button:not(:disabled):active {
+  transform: scale(.98);
+}
+
+.product-category,
+.products-related-status {
+  border: 1px solid rgba(112, 151, 119, .12);
+}
+
+
+@media (max-width: 760px) {
+  .products-modal-backdrop { padding: 10px; }
+  .products-modal { width: 100%; max-width: 100%; max-height: calc(100dvh - 20px); padding: 0; }
+  .products-modal-heading { padding: 18px 18px 14px; }
+  .products-modal-body { padding: 16px 18px 6px; }
+  .products-modal-form .products-modal-actions { padding: 12px 18px 16px; }
+}
+
+
+/* ============================================================================
+   全窗口形变弹层
+   —— 与任务中心同一套做法：按钮位置 → 全屏遮罩 → 卡片浮现
+   ============================================================================ */
+
+.products-morph-viewport {
+  position: fixed !important;
+  z-index: 2147483000 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  overflow: hidden !important;
+  box-sizing: border-box !important;
+  max-width: none !important;
+  max-height: none !important;
+  margin: 0 !important;
+  background: #eef2ec;
+  box-shadow: 0 4px 16px rgba(35, 55, 40, .12);
+  transition:
+    left .5s cubic-bezier(.25, 1, .5, 1),
+    top .5s cubic-bezier(.25, 1, .5, 1),
+    width .5s cubic-bezier(.25, 1, .5, 1),
+    height .5s cubic-bezier(.25, 1, .5, 1),
+    border-radius .5s cubic-bezier(.25, 1, .5, 1),
+    background-color .5s ease,
+    box-shadow .5s ease;
+  will-change: left, top, width, height, border-radius;
+}
+
+/* 起点颜色：与触发操作的语义对应 */
+.products-morph--delete { background: #f7e7e4; }
+.products-morph--detail { background: #e9efe9; }
+
+.products-morph-viewport.is-expanded {
+  left: 0 !important;
+  top: 0 !important;
+  right: auto !important;
+  bottom: auto !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  height: 100dvh !important;
+  min-width: 100vw !important;
+  min-height: 100vh !important;
+  min-height: 100dvh !important;
+  border-radius: 0 !important;
+  background: rgba(29, 44, 36, .46);
+  box-shadow: none;
+  backdrop-filter: blur(4px);
+}
+
+/* 内容层：尺寸恒定，靠容器裁切逐步露出 */
+.products-morph-viewport-content {
+  position: relative !important;
+  display: flex !important;
+  width: 100% !important;
+  height: 100% !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  flex: 1 1 auto !important;
+  align-items: center !important;
+  justify-content: center !important;
+  box-sizing: border-box !important;
+  padding: 24px;
+  opacity: 0;
+  pointer-events: none;
+  /* 收回：0.15s 极速消失、零延迟，容器收缩时内容已不可见 */
+  transition: opacity .15s ease 0s;
+}
+
+.products-morph-viewport.is-expanded .products-morph-viewport-content {
+  opacity: 1;
+  pointer-events: auto;
+  /* 展开：延迟 0.15s 起步，0.4s 慢浮 */
+  transition: opacity .4s ease .15s;
+}
+
+/* ---------- 卡片：容器先行，内容后现 ---------- */
+
+.products-morph-viewport .products-modal,
+.products-morph-viewport .products-confirm-modal {
+  position: relative !important;
+  flex: 0 1 560px !important;
+  margin: 0 auto !important;
+  /* 关闭原 keyframes 进场动画，改由 transition 驱动，
+     否则 animation 的 fill-mode 会锁定终态，与过渡互相打架 */
+  animation: none !important;
+  opacity: 0;
+  transform: translateY(8px) scale(.985);
+  pointer-events: none;
+  transition:
+    opacity .15s ease 0s,
+    transform .15s ease 0s;
+}
+
+.products-morph-viewport.is-expanded .products-modal,
+.products-morph-viewport.is-expanded .products-confirm-modal {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
+  transition:
+    opacity .4s ease .15s,
+    transform .4s cubic-bezier(.25, 1, .5, 1) .15s;
+}
+
+.products-morph-viewport .products-modal {
+  width: min(560px, calc(100vw - 48px)) !important;
+  max-width: 560px !important;
+  max-height: min(86vh, 760px) !important;
+  max-height: min(86dvh, 760px) !important;
+}
+
+.products-morph-viewport .products-detail-modal {
+  flex: 0 1 760px !important;
+  width: min(760px, calc(100vw - 48px)) !important;
+  max-width: 760px !important;
+}
+
+.products-morph-viewport .products-confirm-modal {
+  flex: 0 1 420px !important;
+  width: min(420px, calc(100vw - 48px)) !important;
+  max-width: 420px !important;
+  max-height: min(80vh, 560px) !important;
+  max-height: min(80dvh, 560px) !important;
+  overflow-y: auto;
+}
+
+/* ---------- 内部内容错峰浮现 ---------- */
+
+.products-morph-viewport .products-modal-heading,
+.products-morph-viewport .products-form-grid > label,
+.products-morph-viewport .products-detail-section,
+.products-morph-viewport .products-modal-actions,
+.products-morph-viewport .products-confirm-icon {
+  animation: none !important;
+  opacity: 0;
+  transition: opacity .3s ease 0s, transform .3s cubic-bezier(.25, 1, .5, 1) 0s;
+}
+
+/* 标题栏与底部操作区都带分隔线，只做透明度，加位移会让线条跳动 */
+.products-morph-viewport .products-modal-heading,
+.products-morph-viewport .products-modal-actions {
+  transition: opacity .3s ease 0s;
+}
+
+.products-morph-viewport .products-form-grid > label,
+.products-morph-viewport .products-detail-section,
+.products-morph-viewport .products-confirm-icon {
+  transform: translateY(6px);
+}
+
+.products-morph-viewport.is-expanded .products-modal-heading,
+.products-morph-viewport.is-expanded .products-form-grid > label,
+.products-morph-viewport.is-expanded .products-detail-section,
+.products-morph-viewport.is-expanded .products-modal-actions,
+.products-morph-viewport.is-expanded .products-confirm-icon {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* 头部先于正文 */
+.products-morph-viewport.is-expanded .products-modal-heading {
+  transition-delay: .15s;
+}
+
+/* 表单项逐个错峰：28ms 递进，总跨度 196ms */
+.products-morph-viewport .products-form-grid > label:nth-child(1) { --mx-d: 0ms; }
+.products-morph-viewport .products-form-grid > label:nth-child(2) { --mx-d: 28ms; }
+.products-morph-viewport .products-form-grid > label:nth-child(3) { --mx-d: 56ms; }
+.products-morph-viewport .products-form-grid > label:nth-child(4) { --mx-d: 84ms; }
+.products-morph-viewport .products-form-grid > label:nth-child(5) { --mx-d: 112ms; }
+.products-morph-viewport .products-form-grid > label:nth-child(6) { --mx-d: 140ms; }
+.products-morph-viewport .products-form-grid > label:nth-child(7) { --mx-d: 168ms; }
+.products-morph-viewport .products-form-grid > label:nth-child(8) { --mx-d: 196ms; }
+
+.products-morph-viewport.is-expanded .products-form-grid > label {
+  transition-delay: calc(.19s + var(--mx-d, 0ms));
+}
+
+/* 详情四个区块递进 */
+.products-morph-viewport .products-detail-section:nth-of-type(1) { --mx-d: 0ms; }
+.products-morph-viewport .products-detail-section:nth-of-type(2) { --mx-d: 44ms; }
+.products-morph-viewport .products-detail-section:nth-of-type(3) { --mx-d: 88ms; }
+.products-morph-viewport .products-detail-section:nth-of-type(4) { --mx-d: 132ms; }
+
+.products-morph-viewport.is-expanded .products-detail-section {
+  transition-delay: calc(.19s + var(--mx-d, 0ms));
+}
+
+/* 确认弹窗：容器 → 图标 → 按钮，依次落下 */
+.products-morph-viewport .products-confirm-icon {
+  transform: scale(.6);
+  transition: opacity .4s ease 0s, transform .4s cubic-bezier(.25, 1, .5, 1) 0s;
+}
+
+.products-morph-viewport.is-expanded .products-confirm-icon {
+  transform: scale(1);
+  transition-delay: .21s;
+}
+
+.products-morph-viewport.is-expanded .products-confirm-modal .products-modal-actions {
+  transition-delay: .26s;
+  transform: translateY(0);
+}
+
+.products-morph-viewport.is-expanded .products-modal-actions {
+  transition-delay: .3s;
+}
+
+/* 背景滚动锁定（与 JS 双保险） */
+body:has(.products-morph-viewport) {
+  overflow: hidden;
+}
+
+/* ---------- 窄屏 ---------- */
+
+@media (max-width: 620px) {
+  .products-morph-viewport-content { padding: 12px; }
+
+  .products-morph-viewport .products-modal {
+    width: calc(100vw - 24px) !important;
+    max-height: 88vh !important;
+    max-height: 88dvh !important;
+  }
+
+  .products-morph-viewport .products-detail-modal {
+    width: calc(100vw - 24px) !important;
+  }
+
+  .products-morph-viewport .products-confirm-modal {
+    width: calc(100vw - 40px) !important;
+    padding: 22px 20px;
+  }
+
+  .products-morph-viewport .products-modal {
+    padding: 0;
+  }
+
+  .products-morph-viewport .products-modal-heading {
+    padding: 18px 18px 14px;
+  }
+
+  .products-morph-viewport .products-modal-body {
+    padding: 16px 18px 6px;
+  }
+
+  .products-morph-viewport .products-modal-form .products-modal-actions {
+    padding: 12px 18px 16px;
+  }
+}
+
+/* ---------- 减少动态效果 ---------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .products-morph-viewport,
+  .products-morph-viewport-content,
+  .products-morph-viewport .products-modal,
+  .products-morph-viewport .products-confirm-modal,
+  .products-morph-viewport .products-modal-heading,
+  .products-morph-viewport .products-form-grid > label,
+  .products-morph-viewport .products-detail-section,
+  .products-morph-viewport .products-modal-actions,
+  .products-morph-viewport .products-confirm-icon {
+    transition-duration: .01ms !important;
+    transition-delay: 0ms !important;
+  }
+}
+
+/* ============================================================================
+   products-morph.css
+   商品档案页面 · 弹窗视口修复 + 形变出场时序移植
+
+   用法：把本文件放在 products.css 之后引入（或直接追加到文件末尾）。
+        全部为覆盖式声明，不需要删除原文件中的任何规则。
+
+   目录：
+   1. 参数变量
+   2. 【根因修复】解除 fixed 的包含块囚禁
+   3. 遮罩层：占满视口
+   4. 弹窗出场：容器先行，内容后现（非对称时序）
+   5. 表单 / 详情内容错峰浮现
+   6. 确认弹窗：形变核心
+   7. 背景滚动锁定
+   8. 无障碍降级
+   ============================================================================ */
+
+
+/* ============================================================
+   1. 参数变量
+   ============================================================ */
+
+:root {
+  /* 形变缓动：easeOutQuart 近似 —— 起手快、尾部拖长，形变"弹"出感 */
+  --mx-ease: cubic-bezier(0.25, 1, 0.5, 1);
+
+  /* 时间轴（毫秒） */
+  --mx-backdrop-dur: 200ms;   /* 遮罩淡入，最先到位 */
+  --mx-shell-dur: 420ms;      /* 弹窗容器形变，主役 */
+  --mx-shell-delay: 40ms;     /* 容器比遮罩晚一点起步 */
+  --mx-content-dur: 300ms;    /* 内容淡入，最后的层次 */
+  --mx-head-delay: 150ms;     /* 头部先于正文 */
+  --mx-body-delay: 190ms;     /* 正文滞后，形成纵深 */
+  --mx-step: 28ms;            /* 同类元素错峰步长 */
+
+  /* 出场：永远比进场快，且零延迟 */
+  --mx-out-dur: 130ms;
+
+  /* 形变幅度 */
+  --mx-scale-from: 0.955;
+  --mx-shift-from: 10px;
+}
+
+
+/* ============================================================
+   2. 【根因修复】解除 fixed 的包含块囚禁
+
+   原规则：.products-page { animation: fade-up .3s ease both; }
+   fade-up 含 transform，加上 fill-mode: both，
+   元素上会永久保留 transform → 成为 fixed 后代的包含块，
+   弹窗的 inset: 0 因此指向 .products-page 而非视口。
+
+   改为纯 opacity 动画：视觉上仍是淡入，但不产生包含块。
+   ============================================================ */
+
+.products-page {
+  animation: mx-fade-in 0.3s ease both;
+}
+
+@keyframes mx-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* 若上层容器（#root、.app-shell、.main-content 等）也带有下列任一属性，
+   同样会囚禁 fixed。请逐一检查并在该层移除或改为等价的非包含块写法：
+     transform / translate / rotate / scale
+     filter / backdrop-filter
+     perspective
+     will-change: transform | filter | perspective
+     contain: paint | layout | strict | content
+     container-type: size | inline-size
+   ————————————————————————————————————————————————
+   若上层容器不可控（第三方布局壳），改用 Portal 渲染，最稳：
+     import { createPortal } from 'react-dom'
+     {modalType && createPortal(<div className="products-modal-backdrop">...</div>, document.body)}
+   仅改渲染出口，不改任何文本与逻辑。
+   ============================================================ */
+
+
+/* ============================================================
+   3. 遮罩层：占满视口
+   ============================================================ */
+
+.products-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  /* 双保险：inset 在部分旧内核下配合 flex 父级可能失效，显式给定尺寸 */
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
+  z-index: 9999;               /* 高于页面级 header/toolbar，避免被压住 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  padding: 24px;
+  background: rgba(29, 44, 36, 0.42);
+  backdrop-filter: blur(3px);
+  animation: mx-backdrop-in var(--mx-backdrop-dur) ease both;
+}
+
+@keyframes mx-backdrop-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+
+/* ============================================================
+   4. 弹窗出场：容器先行，内容后现
+
+   对应原形变组件的时序契约：
+     · 容器形变时长最长，负责"展开"叙事
+     · 内容滞后浮现，在形变后半程"长出来"
+     · 缓动统一走 easeOutQuart，避免线性、避免 ease-in-out 的犹豫感
+   ============================================================ */
+
+.products-modal {
+  /* 覆盖原 modal-in（其曲线为普通 ease，缺少形变质感） */
+  animation: mx-shell-in var(--mx-shell-dur) var(--mx-ease) var(--mx-shell-delay) both;
+
+  /* 形变支点略高于几何中心：视觉上更贴合"从按钮处展开"的直觉 */
+  transform-origin: 50% 45%;
+
+  /* 高度跟随视口，而非固定像素 */
+  max-height: min(calc(100dvh - 48px), 900px);
+
+  /* 裁切：内容在形变过程中不溢出容器边界 */
+  overflow-x: hidden;
+  overflow-y: auto;
+
+  /* 注意：这里不写 will-change。
+     transform + opacity 本身已由合成层处理，
+     常驻 will-change 反而会长期占用显存与图层。 */
+}
+
+@keyframes mx-shell-in {
+  from {
+    opacity: 0;
+    transform: scale(var(--mx-scale-from)) translateY(var(--mx-shift-from));
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* 详情弹窗尺寸维持原设定（后定义覆盖早期的 620px） */
+.products-detail-modal {
+  width: min(760px, 100%);
+}
+
+
+/* ============================================================
+   5. 表单 / 详情内容错峰浮现
+   ============================================================ */
+
+.products-modal-heading,
+.products-form-grid > label,
+.products-detail-section,
+.products-modal-actions {
+  animation: mx-content-in var(--mx-content-dur) var(--mx-ease) var(--mx-body-delay) both;
+}
+
+/* 头部先一步出现，正文随后 —— 层次差约 40ms，肉眼不易察觉但质感明显 */
+.products-modal-heading {
+  animation-delay: var(--mx-head-delay);
+}
+
+@keyframes mx-content-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 表单项逐个错峰：8 个字段依次 28ms 递进，总跨度 224ms */
+.products-form-grid > label:nth-child(1) { --mx-d: 0ms; }
+.products-form-grid > label:nth-child(2) { --mx-d: 28ms; }
+.products-form-grid > label:nth-child(3) { --mx-d: 56ms; }
+.products-form-grid > label:nth-child(4) { --mx-d: 84ms; }
+.products-form-grid > label:nth-child(5) { --mx-d: 112ms; }
+.products-form-grid > label:nth-child(6) { --mx-d: 140ms; }
+.products-form-grid > label:nth-child(7) { --mx-d: 168ms; }
+.products-form-grid > label:nth-child(8) { --mx-d: 196ms; }
+
+.products-form-grid > label {
+  animation-delay: calc(var(--mx-body-delay) + var(--mx-d, 0ms));
+}
+
+/* 详情页的四个区块同样递进 */
+.products-detail-section:nth-of-type(1) { --mx-d: 0ms; }
+.products-detail-section:nth-of-type(2) { --mx-d: 44ms; }
+.products-detail-section:nth-of-type(3) { --mx-d: 88ms; }
+.products-detail-section:nth-of-type(4) { --mx-d: 132ms; }
+
+.products-detail-section {
+  animation-delay: calc(var(--mx-body-delay) + var(--mx-d, 0ms));
+}
+
+
+/* ============================================================
+   6. 确认弹窗：形变核心的落点
+
+   体量最小、决策最重，出场可以更有存在感：
+   起点缩得更小、位移更多，末尾收得更紧。
+   ============================================================ */
+
+.products-confirm-modal {
+  animation: mx-confirm-in 0.46s var(--mx-ease) 60ms both;
+  transform-origin: 50% 50%;
+}
+
+@keyframes mx-confirm-in {
+  from {
+    opacity: 0;
+    transform: scale(0.9) translateY(14px);
+  }
+  55% {
+    opacity: 1;
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* 警示图标弹入：滞后于容器，形成"容器先立住、符号再落下"的次序 */
+.products-confirm-icon {
+  animation: mx-icon-in 0.4s var(--mx-ease) 210ms both;
+}
+
+@keyframes mx-icon-in {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* 操作按钮最后浮现 */
+.products-confirm-modal .products-modal-actions {
+  animation: mx-content-in 0.3s var(--mx-ease) 260ms both;
+}
+
+
+/* ============================================================
+   7. 布局修正：统计卡片的空列
+
+   .products-summary 为 repeat(2, 1fr)，但 JSX 只渲染一个子元素，
+   右侧永远空一半。改为按内容自适应，单卡片时自然占满。
+   ============================================================ */
+
+.products-summary {
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+}
+
+
+/* ============================================================
+   8. 背景滚动锁定 + 无障碍降级
+   ============================================================ */
+
+/* 弹窗打开时锁住背景，避免滚轮带动工作区滚动 */
+body:has(.products-modal-backdrop) {
+  overflow: hidden;
+}
+
+/* 尊重系统"减少动态效果"：只保留瞬时显隐，不做任何位移与缩放 */
+@media (prefers-reduced-motion: reduce) {
+  .products-page,
+  .products-modal-backdrop,
+  .products-modal,
+  .products-confirm-modal,
+  .products-confirm-icon,
+  .products-modal-heading,
+  .products-form-grid > label,
+  .products-detail-section,
+  .products-modal-actions,
+  .products-confirm-modal .products-modal-actions {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
+  }
+}
+
+
+/* ============================================================
+   附：若后续需要真正的"退场"动画
+
+   当前弹窗是条件渲染，关闭即卸载，CSS 无法接管退场。
+   若要补齐"出快"的收尾（形变组件的另一半精髓），
+   可在组件内加一个 isClosing 状态延迟卸载，配合：
+
+     .products-modal-backdrop.is-closing {
+       animation: mx-backdrop-out var(--mx-out-dur) ease both;
+     }
+     .products-modal-backdrop.is-closing .products-modal {
+       animation: mx-shell-out var(--mx-out-dur) ease both;
+     }
+
+     @keyframes mx-shell-out {
+       to { opacity: 0; transform: scale(0.97) translateY(6px); }
+     }
+
+   130ms 收完，比进场快一倍以上 —— 这就是"非对称时序"的完整形态。
+   ============================================================ */
+

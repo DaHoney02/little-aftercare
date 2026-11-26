@@ -53,6 +53,33 @@ const dateTimeText = (value) => {
 const getErrorMessage = (error, fallback = '操作失败，请稍后重试。') =>
   error?.message || fallback
 
+const APP_ICON_PATHS = {
+  layout: 'M3 3h8v8H3z M13 3h8v5h-8z M13 10h8v11h-8z M3 13h8v8H3z',
+  list: 'M9 6h12 M9 12h12 M9 18h12 M4 6h.01 M4 12h.01 M4 18h.01',
+  package: 'm12 3 9 5-9 5-9-5 9-5z M3 8v9l9 5 9-5V8 M12 13v9 M7.5 5.5l9 5',
+  receipt: 'M6 3h12v18l-2-1.5L14 21l-2-1.5L10 21l-2-1.5L6 21V3z M9 8h6 M9 12h6 M9 16h4',
+  user: 'M20 21a8 8 0 0 0-16 0 M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8z',
+  settings: 'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-1.7 2.9-.2-.1a1.7 1.7 0 0 0-1.8.1l-.2.1h-3.4l-.1-.2a1.7 1.7 0 0 0-1.5-1l-.2.1-3-1.7.1-.2a1.7 1.7 0 0 0-.1-1.8l-.1-.2v-3.4l.2-.1a1.7 1.7 0 0 0 1-1.5l-.1-.2 1.7-3 .2.1a1.7 1.7 0 0 0 1.8-.1l.2-.1h3.4l.1.2a1.7 1.7 0 0 0 1.5 1l.2-.1 3 1.7-.1.2a1.7 1.7 0 0 0 .1 1.8l.1.2v3.4z',
+  bell: 'M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9 M10 21h4',
+  sparkle: 'm12 3 1.6 5.4L19 10l-5.4 1.6L12 17l-1.6-5.4L5 10l5.4-1.6L12 3z M19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8L19 16z',
+  plus: 'M12 5v14 M5 12h14',
+  clock: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z M12 6v6l4 2',
+  alert: 'M12 3 22 20H2L12 3z M12 9v5 M12 17h.01',
+  search: 'M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16z M17 17l4 4',
+  refresh: 'M20 7v5h-5 M4 17v-5h5 M5.5 9A7 7 0 0 1 18 6l2 6 M4 12l2 6a7 7 0 0 0 12.5-3',
+}
+
+function AppIcon({ name, size = 18, className = '' }) {
+  return (
+    <svg className={`app-icon ${className}`} width={size} height={size} viewBox="0 0 24 24"
+      fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"
+      aria-hidden="true" focusable="false">
+      <path d={APP_ICON_PATHS[name] || APP_ICON_PATHS.sparkle} />
+    </svg>
+  )
+}
+
+
 function App() {
   const { user, authLoading, logout,updateUser } = useAuth()
 
@@ -77,6 +104,8 @@ function App() {
 
   // ---------- 弹窗及表单状态 ----------
   const [modal, setModal] = useState(null)
+  const [modalError, setModalError] = useState('')
+  const [modalAuthError, setModalAuthError] = useState('')
   const [form, setForm] = useState(emptyForm)
   const [aiText, setAiText] = useState('')
   const [candidate, setCandidate] = useState(null)
@@ -114,7 +143,7 @@ function App() {
         upcoming: Array.isArray(deadlineData?.upcoming) ? deadlineData.upcoming : [],
         overdue: Array.isArray(deadlineData?.overdue) ? deadlineData.overdue : [],
       })
-    //   两种通知合并到一个状态中
+
     // 1. 合并售后通知和任务通知
     const mergedNotifications = [
       ...(Array.isArray(notificationData) ? notificationData : []).map((item) => ({
@@ -153,18 +182,39 @@ function App() {
     }
   }, [authLoading, user, loadData])
 
+  const loadNotifications = useCallback(async () => {
+  const [aftercareData, taskData] = await Promise.all([
+    aftercareApi.notifications(SESSION_ID),
+    taskNotificationApi.list(),
+  ])
+
+  const merged = [
+    ...(Array.isArray(aftercareData) ? aftercareData : []).map(
+      item => ({ ...item, notification_type: 'aftercare' })
+    ),
+    ...(Array.isArray(taskData) ? taskData : []).map(
+      item => ({ ...item, notification_type: 'task' })
+    ),
+  ]
+
+  merged.sort(
+    (a, b) =>
+      Date.parse(b.created_at || 0) -
+      Date.parse(a.created_at || 0)
+  )
+
+  setNotifications(merged)
+  }, [])
+
     // 用户保持登录时，每 60 秒刷新一次通知和工作台数据
-    useEffect(() => {
-      if (authLoading || !user) {
-        return
-      }
+   useEffect(() => {
+      if (authLoading || !user) return
+
       const timer = window.setInterval(() => {
-        loadData(false)
+        loadNotifications()
       }, 60 * 1000)
-      return () => {
-        window.clearInterval(timer)
-      }
-    }, [authLoading, user, loadData])
+      return () => window.clearInterval(timer)
+   }, [authLoading, user, loadNotifications])
 
   // 输入停止 300ms 后再更新关键词，避免每次按键都触发列表计算。
   useEffect(() => {
@@ -248,7 +298,7 @@ function App() {
   const unreadCount = notifications.filter((item) => item.status === 'unread').length
 
   // 工作台图表使用已加载的真实记录计算，不额外请求后端。
-  const dashboardStats = useMemo(() => {
+   const dashboardStats = useMemo(() => {
     const total = records.length
     const completed = records.filter((item) => item.status === 'completed').length
     const processing = records.filter((item) => item.status === 'processing').length
@@ -386,10 +436,14 @@ function App() {
   // ---------- 售后记录表单 ----------
   const openCreate = () => {
     setForm(emptyForm)
+    setModalError('')
+    setModalAuthError('')
     setModal({ mode: 'create' })
   }
 
   const openEdit = (record) => {
+    setModalError('')
+    setModalAuthError('')
     setForm({
       title: record.title || '',
       platform: record.platform || '',
@@ -404,16 +458,20 @@ function App() {
 
   const setField = (key, value) => {
     setForm((current) => ({ ...current, [key]: value }))
+    if (modalError) setModalError('')
+    if (modalAuthError) setModalAuthError('')
   }
 
   const saveRecord = async (event) => {
     event.preventDefault()
     if (!form.title.trim()) {
-      setError('请填写商品名称。')
+      setModalError('请填写商品名称。')
       return
     }
 
     setBusy(true)
+    setModalError('')
+    setModalAuthError('')
     setError('')
     const payload = {
       ...form,
@@ -439,7 +497,11 @@ function App() {
       setModal(null)
       await loadData()
     } catch (err) {
-      setError(getErrorMessage(err))
+      const message = getErrorMessage(err)
+      const statusCode = err?.status || err?.response?.status
+      const isAuthError = [401, 403].includes(statusCode) || /登录|认证|未授权|token|unauthorized|forbidden/i.test(message)
+      if (isAuthError) setModalAuthError(message)
+      else setModalError(message)
     } finally {
       setBusy(false)
     }
@@ -548,7 +610,7 @@ function App() {
           aria-current={activePage === 'overview' ? 'page' : undefined}
           type="button"
         >
-          <span aria-hidden="true">▦</span>
+          <AppIcon name="layout" />
           <span className="nav-text">工作台</span>
         </button>
 
@@ -558,7 +620,7 @@ function App() {
           aria-current={activePage === 'records' ? 'page' : undefined}
           type="button"
         >
-          <span aria-hidden="true">▤</span>
+          <AppIcon name="list" />
           <span className="nav-text">我的记录</span>
           <i>{records.length}</i>
         </button>
@@ -569,7 +631,7 @@ function App() {
           aria-current={activePage === 'products' ? 'page' : undefined}
           type="button"
         >
-          <span aria-hidden="true">▣</span>
+          <AppIcon name="package" />
           <span className="nav-text">商品档案</span>
         </button>
 
@@ -579,7 +641,7 @@ function App() {
           aria-current={activePage === 'credentials' ? 'page' : undefined}
           type="button"
         >
-          <span aria-hidden="true">▧</span>
+          <AppIcon name="receipt" />
           <span className="nav-text">购物凭证</span>
         </button>
 
@@ -589,7 +651,7 @@ function App() {
           aria-current={activePage === 'profile' ? 'page' : undefined}
           type="button"
         >
-          <span aria-hidden="true">◎</span>
+          <AppIcon name="user" />
           <span className="nav-text">个人中心</span>
         </button>
 
@@ -599,7 +661,7 @@ function App() {
           aria-current={activePage === 'settings' ? 'page' : undefined}
           type="button"
         >
-          <span aria-hidden="true">⚙</span>
+          <AppIcon name="settings" />
           <span className="nav-text">偏好设置</span>
         </button>
       </nav>
@@ -625,7 +687,7 @@ function App() {
               aria-label={`打开提醒，${unreadCount} 条未读`}
               type="button"
             >
-              🔔{unreadCount > 0 && <i>{unreadCount > 99 ? '99+' : unreadCount}</i>}
+              <AppIcon name="bell" size={19} />{unreadCount > 0 && <i>{unreadCount > 99 ? '99+' : unreadCount}</i>}
             </button>
             <span className="avatar">{user.username?.slice(0, 1).toUpperCase() || 'U'}</span>
             <span className="current-username">{user.username}</span>
@@ -649,7 +711,7 @@ function App() {
               className={`workspace-tab ${workspaceView === 'overview' ? 'active' : ''}`}
               onClick={() => setWorkspaceView('overview')}
             >
-              <span className="workspace-tab-mark">✳</span>
+              <span className="workspace-tab-mark"><AppIcon name="layout" /></span>
               总览
               <small>Overview</small>
             </button>
@@ -660,7 +722,7 @@ function App() {
               className={`workspace-tab ${workspaceView === 'tasks' ? 'active' : ''}`}
               onClick={() => setWorkspaceView('tasks')}
             >
-              <span className="workspace-tab-mark">☷</span>
+              <span className="workspace-tab-mark"><AppIcon name="list" /></span>
               全部任务
               <small>Tasks</small>
             </button>
@@ -673,20 +735,20 @@ function App() {
               <h1>把重要的小事，<em>放心交给我。</em></h1>
               <p className="subtitle">购物之后的退换与保修期限，现在一目了然。</p>
             </div>
-            <button className="primary-button" onClick={openCreate} type="button"><span>＋</span> 新增记录</button>
+            <button className="primary-button" onClick={openCreate} type="button"><AppIcon name="plus" size={17} /> 新增记录</button>
           </section>
 
           <section className="stats-grid">
             <button className="stat-card stat-total clickable-card" onClick={() => showRecords('all')} type="button">
-              <div className="stat-icon">▤</div><span>售后档案 · 查看全部</span>
+              <div className="stat-icon"><AppIcon name="list" size={20} /></div><span>售后档案 · 查看全部</span>
               <strong>{records.length}<small> 条记录</small></strong><p>点击进入记录管理</p>
             </button>
             <button className="stat-card stat-upcoming clickable-card" onClick={() => showRecords('upcoming')} type="button">
-              <div className="stat-icon">◷</div><span>7 天内到期 · 点击查看</span>
+              <div className="stat-icon"><AppIcon name="clock" size={20} /></div><span>7 天内到期 · 点击查看</span>
               <strong>{overview.upcoming.length}<small> 项待关注</small></strong><p>进入相关记录并查看详情</p>
             </button>
             <button className="stat-card stat-overdue clickable-card" onClick={() => showRecords('overdue')} type="button">
-              <div className="stat-icon">!</div><span>已经过期 · 点击查看</span>
+              <div className="stat-icon"><AppIcon name="alert" size={20} /></div><span>已经过期 · 点击查看</span>
               <strong>{overview.overdue.length}<small> 项</small></strong>
               <p>{overview.overdue.length ? '进入过期事项记录' : '目前没有过期事项'}</p>
             </button>
@@ -744,7 +806,7 @@ function App() {
             </div>
             <form className="ai-form" onSubmit={extractWithAi}>
               <textarea value={aiText} onChange={(event) => setAiText(event.target.value)} placeholder="例如：昨天在京东买了无线耳机，七天内可以退，保修一年……" rows={2} />
-              <button className="ai-button" disabled={busy || !aiText.trim()}>{busy ? '整理中…' : '✦ 智能整理'}</button>
+              <button className="ai-button" disabled={busy || !aiText.trim()}>{busy ? '整理中…' : <><AppIcon name="sparkle" size={16} /> 智能整理</>}</button>
             </form>
             {candidate && <div className="candidate-card">
               <div className="candidate-head"><strong>请核对 AI 整理结果</strong><button type="button" className="icon-button" onClick={() => setCandidate(null)}>×</button></div>
@@ -782,14 +844,14 @@ function App() {
             <div><div className="eyebrow">YOUR PURCHASES</div><h2>售后记录</h2></div>
             <div className="record-heading-actions">
               <span className="records-total">共 {filteredRecords.length} 条</span>
-              <button className="refresh-button" onClick={resetSearchAndRefresh} title="刷新并重置搜索条件" type="button">↻ 重置</button>
+              <button className="refresh-button" onClick={resetSearchAndRefresh} title="刷新并重置搜索条件" type="button"><AppIcon name="refresh" size={15} /> 重置</button>
               <button className="primary-button compact" onClick={openCreate} type="button">＋ 新增记录</button>
             </div>
           </div>
 
           <div className="record-query-panel">
             <label className="record-search" htmlFor="record-search-input">
-              <span aria-hidden="true">⌕</span>
+              <AppIcon name="search" size={17} />
               <input
                 id="record-search-input"
                 type="search"
@@ -845,7 +907,7 @@ function App() {
               <div className="empty-state"><div className="loader" />正在加载记录…</div>
             ) : pageRecords.length === 0 ? (
               <div className="empty-state">
-                <div className="empty-icon">▤</div>
+                <div className="empty-icon"><AppIcon name="list" size={28} /></div>
                 <strong>{records.length ? '没有找到符合条件的记录' : '还没有售后记录'}</strong>
                 <p>{records.length ? '试试调整搜索关键词或筛选条件。' : '手动添加一条，或试试上方的 AI 智能整理。'}</p>
                 {!records.length && <button type="button" className="secondary-button" onClick={openCreate}>添加第一条记录</button>}
@@ -885,19 +947,22 @@ function App() {
 
         {activePage === 'settings' && <section className="account-page">
           <div className="section-heading"><div><div className="eyebrow">PREFERENCES</div><h2>偏好设置</h2></div></div>
-          <div className="settings-placeholder"><div className="settings-placeholder-icon">⚙</div><h3>个性化设置即将开放</h3><p>后续可在这里配置提醒偏好、默认排序、页面显示和账户安全选项。</p><span>当前版本：基础展示</span></div>
+          <div className="settings-placeholder"><div className="settings-placeholder-icon"><AppIcon name="settings" size={26} /></div><h3>个性化设置即将开放</h3><p>后续可在这里配置提醒偏好、默认排序、页面显示和账户安全选项。</p><span>当前版本：基础展示</span></div>
         </section>}
 
         <footer className="footer"><span>小事后援 · 让每个售后期限都被妥善记住</span><span>为日常多留一点安心 <b>✳</b></span></footer>
       </main>
 
       {modal && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setModal(null) }}>
+        <div className="record-modal-wrap">
+        {modalAuthError && <div className="modal-auth-error" role="alert">{modalAuthError}</div>}
         <form className="record-modal" onSubmit={saveRecord}>
           <div className="modal-heading">
             <div><div className="eyebrow">AFTERCARE RECORD</div><h2>{modal.mode === 'edit' ? '编辑售后记录' : '新增售后记录'}</h2></div>
-            <button type="button" className="icon-button" onClick={() => setModal(null)}>×</button>
+            <button type="button" className="icon-button" onClick={() => { setModal(null); setModalError(''); setModalAuthError('') }}>×</button>
           </div>
-          <label>商品名称 <b>*</b><input required maxLength="200" value={form.title} onChange={(event) => setField('title', event.target.value)} placeholder="例如：无线耳机" /></label>
+          {modalError && <div className="modal-form-error" role="alert">{modalError}</div>}
+          <label>商品名称 <b>*</b><input aria-invalid={Boolean(modalError && !form.title.trim())} maxLength="200" value={form.title} onChange={(event) => setField('title', event.target.value)} placeholder="例如：无线耳机" /></label>
           <label>购买平台<input maxLength="100" value={form.platform} onChange={(event) => setField('platform', event.target.value)} placeholder="例如：京东、淘宝" /></label>
           <div className="form-row">
             <label>购买日期<input type="date" value={form.purchase_date} onChange={(event) => setField('purchase_date', event.target.value)} /></label>
@@ -909,10 +974,11 @@ function App() {
           </div>
           <label>备注<textarea rows="3" value={form.notes} onChange={(event) => setField('notes', event.target.value)} placeholder="订单号、凭证位置或售后沟通记录" /></label>
           <div className="modal-actions">
-            <button type="button" className="secondary-button" onClick={() => setModal(null)}>取消</button>
+            <button type="button" className="secondary-button" onClick={() => { setModal(null); setModalError(''); setModalAuthError('') }}>取消</button>
             <button className="primary-button compact" disabled={busy}>{busy ? '保存中…' : '保存记录'}</button>
           </div>
         </form>
+        </div>
       </div>}
 
       {notificationsOpen && <NotificationModal

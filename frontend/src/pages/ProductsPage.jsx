@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react'
+import { createPortal } from 'react-dom'
 
 import {
   getProductList,
@@ -24,6 +31,9 @@ const EMPTY_FORM = {
 }
 
 const PAGE_SIZE = 10
+
+// 形变展开时长，需与 products.css 中的 .5s 保持一致
+const MORPH_DURATION = 500
 
 // 将后端返回的日期显示为本地日期。
 function formatDate(value, includeTime = false) {
@@ -116,6 +126,96 @@ function getTaskPriorityLabel(priority) {
   return labels[priority] || priority || '普通'
 }
 
+/**
+ * 全窗口形变弹层。
+ *
+ * 与任务中心保持一致的做法：
+ * 1. 通过 Portal 挂到 document.body，彻底摆脱父级 transform / overflow 造成的
+ *    包含块囚禁，弹层永远以浏览器视口为参照；
+ * 2. 首次渲染时按触发按钮的尺寸与位置落位，两帧后切换 is-expanded，
+ *    由 CSS 过渡把这一小块区域形变为全屏遮罩；
+ * 3. 内容层尺寸恒定，靠容器裁切逐步露出，收敛过程中不会拉伸变形。
+ */
+function MorphShell({
+  anchorRect,
+  expanded,
+  onBackdropClose,
+  className = '',
+  children,
+}) {
+  const viewportRef = useRef(null)
+  const [entered, setEntered] = useState(false)
+
+  // 落位：必须在浏览器绘制前写入，否则会先闪一下全屏再缩回原位
+  useLayoutEffect(() => {
+    const element = viewportRef.current
+    if (!element || !anchorRect) return
+
+    element.style.left = `${anchorRect.left}px`
+    element.style.top = `${anchorRect.top}px`
+    element.style.width = `${anchorRect.width}px`
+    element.style.height = `${anchorRect.height}px`
+    element.style.borderRadius = `${Math.max(8, anchorRect.height / 2)}px`
+  }, [anchorRect])
+
+  // 双击 rAF：让初始位置先完成一次样式计算，再触发形变过渡
+  useEffect(() => {
+    if (!expanded) {
+      setEntered(false)
+      return undefined
+    }
+
+    let secondFrame
+    const firstFrame = requestAnimationFrame(() => {
+      secondFrame = requestAnimationFrame(() => setEntered(true))
+    })
+
+    return () => {
+      cancelAnimationFrame(firstFrame)
+      if (secondFrame) cancelAnimationFrame(secondFrame)
+    }
+  }, [expanded])
+
+  // 形变期间锁住背景滚动
+  useEffect(() => {
+    if (!expanded) return undefined
+
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.body.style.overflow = previousOverflow
+    }
+  }, [expanded])
+
+  // Esc 关闭
+  useEffect(() => {
+    if (!expanded) return undefined
+
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') onBackdropClose?.()
+    }
+
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [expanded, onBackdropClose])
+
+  return createPortal(
+    <div
+      ref={viewportRef}
+      className={`products-morph-viewport ${entered ? 'is-expanded' : ''} ${className}`}
+      onMouseDown={(event) => {
+        // 用 mousedown 而非 click：避免在输入框里拖选文本、松手落到浮层上时误关闭
+        if (!event.target.closest?.('.products-modal, .products-confirm-modal')) {
+          onBackdropClose?.()
+        }
+      }}
+    >
+      <div className="products-morph-viewport-content">{children}</div>
+    </div>,
+    document.body,
+  )
+}
+
 export default function ProductsPage() {
   // -----------------------------
   // 1. 商品列表数据
@@ -148,11 +248,36 @@ export default function ProductsPage() {
   const [deleting, setDeleting] = useState(false)
 
   // -----------------------------
-  // 4. 页面提示
+  // 4. 形变弹层状态
+  // -----------------------------
+  // 每个弹窗各自记录触发按钮的矩形，用于把形变起点对准按钮
+  const [modalAnchorRect, setModalAnchorRect] = useState(null)
+  const [modalExpanded, setModalExpanded] = useState(false)
+  const [detailAnchorRect, setDetailAnchorRect] = useState(null)
+  const [detailExpanded, setDetailExpanded] = useState(false)
+  const [deleteAnchorRect, setDeleteAnchorRect] = useState(null)
+  const [deleteExpanded, setDeleteExpanded] = useState(false)
+
+  // 关闭时先收缩再卸载，退场时表单内容仍然可见，不会突然清空
+  const modalCloseTimer = useRef(null)
+  const detailCloseTimer = useRef(null)
+  const deleteCloseTimer = useRef(null)
+
+  // -----------------------------
+  // 5. 页面提示
   // -----------------------------
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [submitting, setSubmitting] = useState(false)
+
+  useEffect(
+    () => () => {
+      clearTimeout(modalCloseTimer.current)
+      clearTimeout(detailCloseTimer.current)
+      clearTimeout(deleteCloseTimer.current)
+    },
+    [],
+  )
 
   /**
    * 获取商品列表。
@@ -225,10 +350,16 @@ export default function ProductsPage() {
   /**
    * 打开新增商品弹窗。
    */
-  function openCreateModal() {
+  function openCreateModal(event) {
+    const rect = event?.currentTarget?.getBoundingClientRect?.()
+
+    clearTimeout(modalCloseTimer.current)
+    if (rect) setModalAnchorRect(rect)
+
     setForm({ ...EMPTY_FORM })
     setEditingProductId(null)
     setModalType('create')
+    setModalExpanded(true)
     setError('')
   }
 
@@ -236,8 +367,11 @@ export default function ProductsPage() {
    * 打开编辑商品弹窗。
    *
    * 先请求详情，避免只依赖列表中可能不完整的数据。
+   * 锚点矩形在请求前先取好，等数据回来再展开。
    */
-  async function openEditModal(productId) {
+  async function openEditModal(productId, anchorEl) {
+    const rect = anchorEl?.getBoundingClientRect?.()
+    if (rect) setModalAnchorRect(rect)
     setError('')
 
     try {
@@ -257,6 +391,7 @@ export default function ProductsPage() {
 
       setEditingProductId(productId)
       setModalType('edit')
+      setModalExpanded(true)
     } catch (err) {
       setError(err.message || '商品详情获取失败')
     }
@@ -265,12 +400,15 @@ export default function ProductsPage() {
   /**
    * 打开商品详情。
    */
-  async function openDetail(productId) {
+  async function openDetail(productId, anchorEl) {
+    const rect = anchorEl?.getBoundingClientRect?.()
+    if (rect) setDetailAnchorRect(rect)
     setError('')
 
     try {
       const product = await getProductDetail(productId)
       setDetailProduct(product)
+      setDetailExpanded(true)
     } catch (err) {
       setError(err.message || '商品详情获取失败')
     }
@@ -278,11 +416,38 @@ export default function ProductsPage() {
 
   /**
    * 关闭表单弹窗。
+   *
+   * 先让形变收回，500ms 后再清理数据：
+   * 收缩过程中表单内容仍在，不会出现「弹窗还在、字段已空」的跳变。
    */
   function closeModal() {
-    setModalType('')
-    setEditingProductId(null)
-    setForm({ ...EMPTY_FORM })
+    setModalExpanded(false)
+    clearTimeout(modalCloseTimer.current)
+    modalCloseTimer.current = window.setTimeout(() => {
+      setModalType('')
+      setEditingProductId(null)
+      setForm({ ...EMPTY_FORM })
+      setModalAnchorRect(null)
+    }, MORPH_DURATION)
+  }
+
+  function closeDetail() {
+    setDetailExpanded(false)
+    clearTimeout(detailCloseTimer.current)
+    detailCloseTimer.current = window.setTimeout(() => {
+      setDetailProduct(null)
+      setDetailAnchorRect(null)
+    }, MORPH_DURATION)
+  }
+
+  function closeDelete() {
+    if (deleting) return
+    setDeleteExpanded(false)
+    clearTimeout(deleteCloseTimer.current)
+    deleteCloseTimer.current = window.setTimeout(() => {
+      setDeletingProduct(null)
+      setDeleteAnchorRect(null)
+    }, MORPH_DURATION)
   }
 
   /**
@@ -335,8 +500,13 @@ export default function ProductsPage() {
   /**
    * 删除商品。
    */
-  function openDeleteModel(product) {
+  function openDeleteModel(product, anchorEl) {
+    const rect = anchorEl?.getBoundingClientRect?.()
+    clearTimeout(deleteCloseTimer.current)
+    if (rect) setDeleteAnchorRect(rect)
+
     setDeletingProduct(product)
+    setDeleteExpanded(true)
   }
 
   async function handleDelete(product) {
@@ -350,7 +520,7 @@ export default function ProductsPage() {
     try {
       await deleteProduct(deletingProduct.id)
       setNotice('该商品档案已删除')
-      setDeletingProduct(null)
+      closeDelete()
 
       // 如果当前页删除后变空，回到上一页。
       if (products.length === 1 && page > 1) {
@@ -542,21 +712,21 @@ export default function ProductsPage() {
                 <button
                   type="button"
                   className="text-button"
-                  onClick={() => openDetail(product.id)}
+                  onClick={(event) => openDetail(product.id, event.currentTarget)}
                 >
                   详情
                 </button>
                 <button
                   type="button"
                   className="text-button"
-                  onClick={() => openEditModal(product.id)}
+                  onClick={(event) => openEditModal(product.id, event.currentTarget)}
                 >
                   编辑
                 </button>
                 <button
                   type="button"
                   className="text-button danger"
-                  onClick={() => openDeleteModel(product)}
+                  onClick={(event) => openDeleteModel(product, event.currentTarget)}
                 >
                   删除
                 </button>
@@ -565,49 +735,6 @@ export default function ProductsPage() {
           ))
         )}
       </div>
-
-      {/* 删除确认弹窗 */}
-      {deletingProduct && (
-        <div
-          className="products-modal-backdrop"
-          onClick={() => {
-            if (!deleting) {
-              setDeletingProduct(null)
-            }
-          }}
-        >
-          <div
-            className="products-confirm-modal"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="products-confirm-icon">!</div>
-            <h3>确认删除商品？</h3>
-            <p>
-              确定删除「{deletingProduct.name}」吗？
-              删除后将无法恢复，请谨慎操作。
-            </p>
-
-            <div className="products-modal-actions">
-              <button
-                type="button"
-                className="secondary-button"
-                disabled={deleting}
-                onClick={() => setDeletingProduct(null)}
-              >
-                取消
-              </button>
-              <button
-                type="button"
-                className="danger-button"
-                disabled={deleting}
-                onClick={handleDelete}
-              >
-                {deleting ? '删除中...' : '确认删除'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* 分页 */}
       {!loading && totalPages > 0 && (
@@ -637,9 +764,51 @@ export default function ProductsPage() {
         </div>
       )}
 
+      {/* 删除确认弹窗 */}
+      {deletingProduct && (
+        <MorphShell
+          anchorRect={deleteAnchorRect}
+          expanded={deleteExpanded}
+          className="products-morph--delete"
+          onBackdropClose={closeDelete}
+        >
+          <div className="products-confirm-modal">
+            <div className="products-confirm-icon">!</div>
+            <h3>确认删除商品？</h3>
+            <p>
+              确定删除「{deletingProduct.name}」吗？
+              删除后将无法恢复，请谨慎操作。
+            </p>
+
+            <div className="products-modal-actions">
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={deleting}
+                onClick={closeDelete}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="danger-button"
+                disabled={deleting}
+                onClick={handleDelete}
+              >
+                {deleting ? '删除中...' : '确认删除'}
+              </button>
+            </div>
+          </div>
+        </MorphShell>
+      )}
+
       {/* 新增 / 编辑弹窗 */}
       {modalType && (
-        <div className="products-modal-backdrop">
+        <MorphShell
+          anchorRect={modalAnchorRect}
+          expanded={modalExpanded}
+          onBackdropClose={closeModal}
+        >
           <div className="products-modal">
             <div className="products-modal-heading">
               <div>
@@ -652,97 +821,99 @@ export default function ProductsPage() {
               </button>
             </div>
 
-            <form onSubmit={handleSubmit}>
-              <div className="products-form-grid">
-                <label>
-                  <span>商品名称 *</span>
-                  <input
-                    name="name"
-                    value={form.name}
-                    onChange={handleFormChange}
-                    maxLength={200}
-                    required
-                    placeholder="例如：无线蓝牙耳机"
-                  />
-                </label>
+            <form onSubmit={handleSubmit} className="products-modal-form">
+              <div className="products-modal-body">
+                <div className="products-form-grid">
+                  <label>
+                    <span>商品名称 *</span>
+                    <input
+                      name="name"
+                      value={form.name}
+                      onChange={handleFormChange}
+                      maxLength={200}
+                      required
+                      placeholder="例如：无线蓝牙耳机"
+                    />
+                  </label>
 
-                <label>
-                  <span>品牌</span>
-                  <input
-                    name="brand"
-                    value={form.brand}
-                    onChange={handleFormChange}
-                    maxLength={100}
-                    placeholder="例如：Sony"
-                  />
-                </label>
+                  <label>
+                    <span>品牌</span>
+                    <input
+                      name="brand"
+                      value={form.brand}
+                      onChange={handleFormChange}
+                      maxLength={100}
+                      placeholder="例如：Sony"
+                    />
+                  </label>
 
-                <label>
-                  <span>型号</span>
-                  <input
-                    name="model"
-                    value={form.model}
-                    onChange={handleFormChange}
-                    maxLength={100}
-                    placeholder="商品型号"
-                  />
-                </label>
+                  <label>
+                    <span>型号</span>
+                    <input
+                      name="model"
+                      value={form.model}
+                      onChange={handleFormChange}
+                      maxLength={100}
+                      placeholder="商品型号"
+                    />
+                  </label>
 
-                <label>
-                  <span>分类</span>
-                  <input
-                    name="category"
-                    value={form.category}
-                    onChange={handleFormChange}
-                    maxLength={100}
-                    placeholder="例如：数码产品"
-                  />
-                </label>
+                  <label>
+                    <span>分类</span>
+                    <input
+                      name="category"
+                      value={form.category}
+                      onChange={handleFormChange}
+                      maxLength={100}
+                      placeholder="例如：数码产品"
+                    />
+                  </label>
 
-                <label>
-                  <span>购买价格</span>
-                  <input
-                    name="purchase_price"
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={form.purchase_price}
-                    onChange={handleFormChange}
-                    placeholder="请输入购买价格"
-                  />
-                </label>
+                  <label>
+                    <span>购买价格</span>
+                    <input
+                      name="purchase_price"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={form.purchase_price}
+                      onChange={handleFormChange}
+                      placeholder="请输入购买价格"
+                    />
+                  </label>
 
-                <label>
-                  <span>购买日期</span>
-                  <input
-                    name="purchase_date"
-                    type="date"
-                    value={form.purchase_date}
-                    onChange={handleFormChange}
-                  />
-                </label>
+                  <label>
+                    <span>购买日期</span>
+                    <input
+                      name="purchase_date"
+                      type="date"
+                      value={form.purchase_date}
+                      onChange={handleFormChange}
+                    />
+                  </label>
 
-                <label>
-                  <span>购买渠道</span>
-                  <input
-                    name="purchase_channel"
-                    value={form.purchase_channel}
-                    onChange={handleFormChange}
-                    maxLength={100}
-                    placeholder="例如：淘宝、京东、线下门店"
-                  />
-                </label>
+                  <label>
+                    <span>购买渠道</span>
+                    <input
+                      name="purchase_channel"
+                      value={form.purchase_channel}
+                      onChange={handleFormChange}
+                      maxLength={100}
+                      placeholder="例如：淘宝、京东、线下门店"
+                    />
+                  </label>
 
-                <label className="products-form-full">
-                  <span>商品描述 / 备注</span>
-                  <textarea
-                    name="description"
-                    value={form.description}
-                    onChange={handleFormChange}
-                    rows={4}
-                    placeholder="可以填写商品特点、购买说明等信息"
-                  />
-                </label>
+                  <label className="products-form-full">
+                    <span>商品描述 / 备注</span>
+                    <textarea
+                      name="description"
+                      value={form.description}
+                      onChange={handleFormChange}
+                      rows={4}
+                      placeholder="可以填写商品特点、购买说明等信息"
+                    />
+                  </label>
+                </div>
               </div>
 
               <div className="products-modal-actions">
@@ -764,35 +935,35 @@ export default function ProductsPage() {
               </div>
             </form>
           </div>
-        </div>
+        </MorphShell>
       )}
 
       {/* 商品详情弹窗 */}
-        {detailProduct && (
-          <div
-            className="products-modal-backdrop"
-            onClick={() => setDetailProduct(null)}
-          >
-            <div
-              className="products-modal products-detail-modal"
-              onClick={(event) => event.stopPropagation()}
-            >
-              {/* 弹窗标题 */}
-              <div className="products-modal-heading">
-                <div>
-                  <div className="eyebrow">PRODUCT DETAILS</div>
-                  <h3>{detailProduct.name}</h3>
-                </div>
-
-                <button
-                  type="button"
-                  className="icon-button"
-                  onClick={() => setDetailProduct(null)}
-                >
-                  ×
-                </button>
+      {detailProduct && (
+        <MorphShell
+          anchorRect={detailAnchorRect}
+          expanded={detailExpanded}
+          className="products-morph--detail"
+          onBackdropClose={closeDetail}
+        >
+          <div className="products-modal products-detail-modal">
+            {/* 弹窗标题 */}
+            <div className="products-modal-heading">
+              <div>
+                <div className="eyebrow">PRODUCT DETAILS</div>
+                <h3>{detailProduct.name}</h3>
               </div>
 
+              <button
+                type="button"
+                className="icon-button"
+                onClick={closeDetail}
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="products-modal-body">
               {/* 商品基础信息 */}
               <section className="products-detail-section">
                 <div className="products-section-heading">
@@ -991,7 +1162,8 @@ export default function ProductsPage() {
               </section>
             </div>
           </div>
-        )}
+        </MorphShell>
+      )}
     </section>
   )
 }

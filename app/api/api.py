@@ -8,7 +8,8 @@ from fastapi import APIRouter, Depends,Request
 from starlette.responses import StreamingResponse
 
 from app.chat_service import ChatService
-from app.core.dependencies import get_chat_service
+from app.core.dependencies import get_chat_service, get_current_user
+from app.db.models import User
 from app.schemas.response import ResponseModel
 from app.schemas.schemas import ChatResponse, ChatRequest
 
@@ -20,13 +21,15 @@ router=APIRouter()  #创建子路由对象router
 def chat(
         request:ChatRequest,
         http_request:Request,
-        chat_service:ChatService=Depends(get_chat_service)
+        chat_service:ChatService=Depends(get_chat_service),
+        current_user:User=Depends(get_current_user)
 ):
     """处理聊天请求"""
 
     answer=chat_service.chat(
         request.messages,
-        session_id=request.session_id
+        session_id=request.session_id,
+        user_id=current_user.id
     )
 
     return  ResponseModel[ChatResponse](
@@ -38,15 +41,17 @@ def chat(
 def chat_stream(
         request:ChatRequest,
         http_request:Request,
-        chat_service:ChatService=Depends(get_chat_service)
+        chat_service:ChatService=Depends(get_chat_service),
+        current_user:User=Depends(get_current_user)
 ):
     """以SSE方式流式返回模型回答"""
-    # ttp_request.state---请求级上下文存储(中间件一般在请求进来时生成trace_id放到state，用于全链路追踪)
+    # http_request.state---请求级上下文存储(中间件一般在请求进来时生成trace_id放到state，用于全链路追踪)
     trace_id=http_request.state.trace_id
     def event_stream():
         stream=chat_service.chat_stream(
-            request.messages,
-            session_id=request.session_id
+            messages=request.messages,
+            session_id=request.session_id,
+            user_id=current_user.id
         )
         try:
             # 迭代大模型流式分片

@@ -400,6 +400,10 @@ class ChatService:
                     logger.error("未知的待确认操作类型：%s", action)
                     return "无法识别当前待确认操作，请重新发起请求。"
 
+        # 普通消息直接交给聊天模型，不额外调用意图分类模型。
+        if not self._may_be_aftercare_operation(user_text):
+            return None
+
         # ==================================================
         # 二、没有待确认操作，识别用户当前意图
         # ==================================================
@@ -478,6 +482,7 @@ class ChatService:
         if intent == "update_aftercare":
             return self._update_aftercare(
                 user_text=user_text,
+                user_id=user_id,
                 session_id=session_id,
             )
 
@@ -759,3 +764,19 @@ class ChatService:
             f"记录 ID：{record.id}\n"
             "请回复“确认删除”执行删除，或回复“取消”放弃操作。"
         )
+
+    @staticmethod
+    def _may_be_aftercare_operation(text: str) -> bool:
+        """
+        粗略判断消息是否可能包含售后记录操作。
+
+        这里只负责减少不必要的意图分类调用，
+        不负责最终确定用户意图。
+        """
+        keywords = (
+            "记录", "保存","新增","添加","查询",
+            "查看","列出","修改","更改","更新",
+            "删除","移除","退货","保修","售后",
+        )
+
+        return any(keyword in text for keyword in keywords)

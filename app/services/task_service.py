@@ -3,7 +3,7 @@ from math import ceil
 
 from fastapi import HTTPException,status
 
-from sqlalchemy import select
+from sqlalchemy import select, or_
 from sqlalchemy.orm import Session
 
 from app.db.models import Product, AftercareRecord, Task
@@ -373,6 +373,16 @@ class TaskService:
         records = self.db.scalars(
             select(AftercareRecord).where(
                 AftercareRecord.status != "completed",
+            or_(
+                AftercareRecord.return_deadline.between(
+                    today,
+                    end_date
+                ),
+                AftercareRecord.warranty_deadline.between(
+                    today,
+                    end_date
+                ),
+            )
             )
         ).all()
 
