@@ -1,6 +1,8 @@
 import logging
 import re
 from typing import Iterator
+
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from sqlalchemy.orm import Session
 
 from app.db.aftercare.aftercare_respository import (
@@ -19,6 +21,7 @@ from app.db.aftercare.pending_aftercare_repository import (
     delete_pending,
     save_pending
 )
+from app.graphs.query_graph import build_query_graph
 from app.llm_client import LLMClient
 from app.schemas.aftercare import AftercareCreate, AftercareUpdate
 from app.schemas.schemas import Message
@@ -102,7 +105,8 @@ class ChatService:
         answer = self._handle_aftercare_intent(
             user_text=user_text,
             user_id=user_id,
-            session_id=session_id
+            session_id=session_id,
+            messages=full_messages
         )
         # None 表示这不是已处理的售后业务，继续走普通聊天。
         if answer is None:
@@ -231,6 +235,7 @@ class ChatService:
             user_text: str,
             user_id:int,
             session_id: str | None,
+            messages:list[Message]
     ) -> str | None:
         """
         处理售后业务意图。
@@ -401,7 +406,7 @@ class ChatService:
                     return "无法识别当前待确认操作，请重新发起请求。"
 
         # 普通消息直接交给聊天模型，不额外调用意图分类模型。
-        if not self._may_be_aftercare_operation(user_text):
+        if not self._may_be_business_operation(user_text):
             return None
 
         # ==================================================
@@ -453,31 +458,12 @@ class ChatService:
                 session_id=session_id,
             )
 
-        if intent == "query_aftercare":
-            records,total = list_records(
-                db=self.db,
-                user_id=user_id,
-                limit=50,
-                offset=0,
+        if intent in { "query_aftercare","query_business"}:
+           return self._query_business(
+               messages=messages,
+               user_id=user_id,
+               thread_id=session_id
             )
-
-            if not records:
-                return "当前会话还没有已保存的售后记录。"
-
-            lines = [f"查询到以下售后记录：(共{total}条，当前展示{len(records)}条)"]
-
-            for record in records:
-                lines.append(
-                    f"记录 ID：{record.id}\n"
-                    f"商品：{record.title or '未填写'}\n"
-                    f"平台：{record.platform or '未填写'}\n"
-                    f"购买日期：{record.purchase_date or '未填写'}\n"
-                    f"退货截止日期：{record.return_deadline or '未填写'}\n"
-                    f"保修截止日期：{record.warranty_deadline or '未填写'}\n"
-                    f"状态：{record.status}"
-                )
-
-            return "\n\n".join(lines)
 
         if intent == "update_aftercare":
             return self._update_aftercare(
@@ -692,6 +678,7 @@ class ChatService:
                 record_id,
             )
             raise
+
     def _delete_aftercare(
             self,
             user_text: str,
@@ -766,17 +753,91 @@ class ChatService:
         )
 
     @staticmethod
-    def _may_be_aftercare_operation(text: str) -> bool:
+    def _may_be_business_operation(text: str) -> bool:
         """
-        粗略判断消息是否可能包含售后记录操作。
+        粗略判断消息是否可能包含业务操作。
 
         这里只负责减少不必要的意图分类调用，
         不负责最终确定用户意图。
         """
         keywords = (
+            #售后记录
             "记录", "保存","新增","添加","查询",
             "查看","列出","修改","更改","更新",
             "删除","移除","退货","保修","售后",
+
+            #商品档案
+            "商品", "产品", "品牌", "型号",
+            "购买", "购物", "分类",
+
+            # 任务
+            "任务", "待办", "事项", "提醒",
+            "已完成", "未完成", "优先级",
         )
 
         return any(keyword in text for keyword in keywords)
+
+    def _query_business(
+            self,
+            messages: list[Message],
+            user_id: int,
+            thread_id: str,
+    ) -> str:
+        """通过 LangGraph 查询当前登录用户的业务数据。
+        未使用checkpointer历史持久化，因有会话里会话管理机制
+        """
+
+        if self.db is None:
+            raise RuntimeError("数据库连接不可用")
+
+        if not thread_id:
+            raise ValueError("会话 ID 不能为空")
+
+        graph_messages = []
+
+        # 将项目消息模型转换为 LangChain 消息对象
+        for msg in messages:
+            match msg.role:
+                case "user":
+                    graph_messages.append(
+                        HumanMessage(content=msg.content)
+                    )
+                case "assistant":
+                    graph_messages.append(
+                        AIMessage(content=msg.content)
+                    )
+                case "system":
+                    graph_messages.append(
+                        SystemMessage(content=msg.content)
+                    )
+                case _:
+                    raise ValueError(f"不支持的角色: {msg.role}")
+
+        if not graph_messages:
+            raise ValueError("查询消息不能为空")
+
+        # 按当前用户构建专属查询工具，避免跨用户共享身份上下文
+        graph = build_query_graph(
+            db=self.db,
+            user_id=user_id,
+        )
+
+        result = graph.invoke(
+            {"messages": graph_messages},
+            config={
+                "configurable": {
+                    "thread_id": thread_id,
+                },
+                "recursion_limit":10,  #限制节点执行步数
+            },
+        )
+
+        # 从后向前寻找最后一条有效的 AI 文本消息
+        for msg in reversed(result["messages"]):
+            if isinstance(msg, AIMessage):
+                text = msg.content
+
+                if isinstance(text, str) and text.strip():
+                    return text.strip()
+
+        raise RuntimeError("业务查询未生成有效回答")

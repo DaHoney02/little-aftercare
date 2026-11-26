@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel,Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 # schema定义模型允许返回的意图类型
@@ -14,12 +14,16 @@ class IntentRequest(BaseModel):
 
 class IntentResult(BaseModel):
     """意图识别结果，不包含数据库操作"""
+
+    model_config = ConfigDict(extra="forbid")  #防止模型返回schema未定义的字段
+
     intent:Literal[
         "chat",
         "create_aftercare",
         "query_aftercare",
         "update_aftercare",
-        "delete_aftercare"
+        "delete_aftercare",
+        "query_business"
     ]=Field(description="用户当前消息对应的业务意图")
 
     reason:str=Field(

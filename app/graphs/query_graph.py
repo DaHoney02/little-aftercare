@@ -18,12 +18,14 @@ QUERY_SYSTEM_PROMPT="""
 规则：
 1.当用户的问题涉及商品、售后记录和任务数据时，优先调用对应的查询工具
 2.只能使用提供的查询工具获取业务数据，不允许编造查询结果
-3.不允许生产或执行SQL
+3.不允许生成或执行SQL
 4.不允许查询其他用户的数据
 5.工具没有返回的数据，不得自行推测
 6.若查询结果为空，明确告诉用户没有找到符合条件的记录
 7.使用简洁、清晰的中文回答
 8.若用户的问题缺少必要条件，可以先询问用户
+9. 只能查询当前登录用户自己的数据，不能要求用户提供 user_id。
+10. 如果用户同时查询多个业务类型，可以连续调用多个查询工具，再整合结果回答。
 """
 
 def build_query_llm():
@@ -34,7 +36,8 @@ def build_query_llm():
         model=settings.MODEL_NAME,
         api_key=settings.DASHSCOPE_API_KEY,
         base_url=settings.DASHSCOPE_BASE_URL,
-        temperature=0
+        temperature=0,
+        timeout=30
     )
 
 def build_query_graph(db:Session,user_id:int,llm=None):
@@ -71,7 +74,7 @@ def build_query_graph(db:Session,user_id:int,llm=None):
     #7.设置条件路由
     #模型发出工具条用->tools
     #模型直接回答->END
-    graph_builder.add_condition_edges(
+    graph_builder.add_conditional_edges(
         "agent",
         tools_condition,
         {
