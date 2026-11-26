@@ -41,7 +41,7 @@ class AftercareQueryArgs(BaseModel):
         ge=1,
         description="关联的商品档案 ID",
     )
-    status: str | None = Field(
+    status: Literal["pending","processing","completed"] | None = Field(
         default=None,
         max_length=30,
         description="售后记录状态",

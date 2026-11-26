@@ -54,12 +54,12 @@ def _query_products(
             "purchase_channel":product.purchase_channel
         }for product in products
     ]
-
     return {
         "items":items,
         "total":total,
         "page":page,
-        "page_size":page_size
+        "page_size":page_size,
+        "total_pages": (total + page_size - 1) // page_size,
     }
 
 def build_query_products_tool(

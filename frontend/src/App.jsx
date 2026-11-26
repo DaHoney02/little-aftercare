@@ -7,11 +7,6 @@ import ProductsPage from './pages/ProductsPage.jsx'
 import ProductCredPage from './pages/ProductCredPage.jsx'
 import TaskCenter from './pages/TaskCenter.jsx'
 
-// 兼容当前项目原有接口：记录列表仍通过 list(SESSION_ID) 一次读取，
-// 搜索、筛选、排序和分页在前端完成，不依赖尚未确认的后端分页参数。
-const SESSION_ID = localStorage.getItem('little-aftercare-session') || 'web-demo-session'
-localStorage.setItem('little-aftercare-session', SESSION_ID)
-
 const PAGE_SIZE_OPTIONS = [5, 10, 20, 50]
 
 const emptyForm = {
@@ -124,12 +119,18 @@ function App() {
     setError('')
 
     try {
-      const [recordData, deadlineData, notificationData,taskNotificationData] = await Promise.all([
-        aftercareApi.list(SESSION_ID),
-        aftercareApi.overview(SESSION_ID),
-        aftercareApi.notifications(SESSION_ID),
-        taskNotificationApi.list()
-      ])
+      const [
+          recordData,
+          deadlineData,
+          notificationData,
+          taskNotificationData,
+        ] = await Promise.all([
+          // 当前用户身份由请求头中的 JWT 确定
+          aftercareApi.list(),
+          aftercareApi.overview(),
+          aftercareApi.notifications(),
+          taskNotificationApi.list(),
+        ])
 
       // 兼容旧接口直接返回数组，以及包装成 { items: [] } 的接口格式。
       const recordItems = Array.isArray(recordData)
@@ -183,27 +184,35 @@ function App() {
   }, [authLoading, user, loadData])
 
   const loadNotifications = useCallback(async () => {
-  const [aftercareData, taskData] = await Promise.all([
-    aftercareApi.notifications(SESSION_ID),
-    taskNotificationApi.list(),
-  ])
+      const [aftercareData, taskData] = await Promise.all([
+        aftercareApi.notifications(),
+        taskNotificationApi.list(),
+      ])
 
-  const merged = [
-    ...(Array.isArray(aftercareData) ? aftercareData : []).map(
-      item => ({ ...item, notification_type: 'aftercare' })
-    ),
-    ...(Array.isArray(taskData) ? taskData : []).map(
-      item => ({ ...item, notification_type: 'task' })
-    ),
-  ]
+      const merged = [
+        ...(Array.isArray(aftercareData) ? aftercareData : []).map(
+          (item) => ({
+            ...item,
+            notification_type: 'aftercare',
+          }),
+        ),
 
-  merged.sort(
-    (a, b) =>
-      Date.parse(b.created_at || 0) -
-      Date.parse(a.created_at || 0)
-  )
+        ...(Array.isArray(taskData) ? taskData : []).map(
+          (item) => ({
+            ...item,
+            notification_type: 'task',
+          }),
+        ),
+      ]
 
-  setNotifications(merged)
+      // 最新通知排在前面
+      merged.sort(
+        (a, b) =>
+          Date.parse(b.created_at || 0) -
+          Date.parse(a.created_at || 0),
+      )
+
+      setNotifications(merged)
   }, [])
 
     // 用户保持登录时，每 60 秒刷新一次通知和工作台数据
@@ -364,7 +373,7 @@ function App() {
           const updated =
             notification.notification_type === 'task'
               ? await taskNotificationApi.markRead(notification.id)
-              : await aftercareApi.markNotificationRead(notification.id, SESSION_ID)
+              : await aftercareApi.markNotificationRead(notification.id)
 
           setNotifications((current) => {
             let hit = false
@@ -387,7 +396,7 @@ function App() {
           markingRef.current.delete(key)
         }
       },
-      [SESSION_ID]
+      []
     )
 
 // 区分notification_type
@@ -481,14 +490,13 @@ function App() {
       return_deadline: form.return_deadline || null,
       warranty_deadline: form.warranty_deadline || null,
       notes: form.notes.trim() || null,
-      session_id: SESSION_ID,
     }
 
     try {
       if (modal?.mode === 'edit') {
         const patch = { ...payload }
         delete patch.session_id
-        await aftercareApi.update(modal.record.id, SESSION_ID, patch)
+        await aftercareApi.update(modal.record.id, null, payload)
         setNotice('记录已更新。')
       } else {
         await aftercareApi.create(payload)
@@ -512,7 +520,7 @@ function App() {
     setBusy(true)
     setError('')
     try {
-      await aftercareApi.remove(record.id, SESSION_ID)
+      await aftercareApi.remove(record.id)
       setNotice('记录已删除。')
       await loadData()
     } catch (err) {
@@ -556,7 +564,6 @@ function App() {
         warranty_deadline: candidate.warranty_deadline || null,
         notes: candidate.notes || null,
         status: 'pending',
-        session_id: SESSION_ID,
       })
       setCandidate(null)
       setAiText('')

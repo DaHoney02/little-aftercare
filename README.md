@@ -1,238 +1,282 @@
-# 小事后援
+# 小事后援（Little Aftercare）
 
-> 一个面向个人购物售后场景的 AI 辅助管理应用。
-> 帮助用户记录商品购买信息、管理退货与保修期限，并通过 AI 将自然语言整理为待确认的售后记录。
+> 一个面向个人购物售后场景的 AI 辅助管理应用。  
+> 帮助用户管理商品档案、购物凭证、售后期限和待办任务，并通过 AI 降低购物售后信息整理与处理成本。
 
-## 1. 项目背景
+## 1. 项目介绍
 
-购物后的退货期限、保修日期、订单信息往往分散在购物平台、聊天记录和截图中，用户容易错过售后处理时间。
+购物后的订单信息、退货期限、保修日期和购物凭证通常分散在不同平台、聊天记录和截图中，容易遗忘重要的售后时间。
 
-“小事后援”希望解决的问题是：
+**小事后援**围绕购物后的管理场景，提供商品档案、售后记录、购物凭证、任务提醒和 AI 辅助能力。
 
-- 用户可以手动记录购买与售后信息；
-- 用户可以用一句自然语言快速创建候选记录；
-- 系统展示即将到期和已经过期的事项；
-- 系统定时生成站内提醒；
-- 用户可在前端查看提醒、标记已读并进入对应记录详情。
+项目不是单纯的 AI 聊天 Demo，而是一个以真实业务数据和业务操作为核心的应用。
 
 ## 2. 核心功能
 
-### 售后记录管理
+### 2.1 用户认证与个人中心
 
-- 创建、查看、编辑、删除售后记录；
-- 记录商品名称、购买平台、购买日期、退货期限、保修期限、备注与处理状态；
-- 使用 `session_id` 实现演示阶段的数据隔离；
-- 支持按全部、未完成、已完成、即将到期、已过期筛选记录。
+- 用户注册、登录和退出登录。
+- 使用 JWT 进行身份认证。
+- 页面刷新后恢复登录状态。
+- 后端根据当前登录用户进行数据隔离。
+- 个人资料管理。
 
-### AI 一句话整理
+### 2.2 售后记录管理
 
-用户输入：
+- 创建、查看、编辑和删除售后记录。
+- 记录商品名称、购买平台、购买日期、退货期限、保修期限和备注。
+- 支持关键词搜索、状态筛选、期限筛选、排序和分页。
+- 展示即将到期和已经过期的售后事项。
+
+### 2.3 AI 一句话整理
+
+用户可以通过自然语言描述购买信息，例如：
 
 ```text
 昨天在京东买了无线耳机，七天内可以退，保修一年。
 ```
 
-系统流程：
+处理流程：
 
 ```text
 自然语言输入
-→ 意图识别
-→ AI 提取结构化字段
-→ Pydantic 校验
-→ 前端展示待确认候选记录
-→ 用户补充或修改
-→ 保存正式售后记录
+    ↓
+意图识别
+    ↓
+AI 提取结构化字段
+    ↓
+Pydantic Schema 校验
+    ↓
+前端展示候选记录
+    ↓
+用户确认或修改
+    ↓
+保存正式售后记录
 ```
 
-AI 不直接写入正式表，必须经过用户确认，避免模型幻觉或日期理解错误直接污染业务数据。
+AI 提取结果不会直接写入正式业务数据，必须经过用户确认。
 
-### 售后期限与提醒
+### 2.4 商品档案
 
-- 查询未来 7 天内即将到期的退货或保修事项；
-- 查询已经过期的事项；
-- 展示期限总览；
-- 使用 APScheduler 定时扫描到期事项；
-- 生成站内提醒；
-- 使用数据库唯一约束避免重复生成提醒；
-- 前端铃铛显示未读数量和未读状态；
-- 用户可标记提醒已读，并跳转查看对应记录。
+- 商品档案新增、查询、编辑和删除。
+- 记录商品名称、品牌、型号、分类、购买价格、购买日期和购买渠道。
+- 支持商品搜索、分类筛选、排序和分页。
+- 商品可以关联售后记录和购物凭证。
 
-## 3. 系统架构
+### 2.5 购物凭证
 
-```mermaid
-flowchart LR
-    U[用户] --> FE[React + Vite 前端]
-    FE --> API[FastAPI API]
-    API --> Router[Router 路由层]
-    Router --> Service[Service 业务层]
-    Service --> Repo[Repository 数据访问层]
-    Repo --> DB[(PostgreSQL)]
+- 上传购物凭证文件。
+- 支持 JPG、JPEG、PNG、WEBP 和 PDF 格式。
+- 对文件扩展名、MIME 类型、实际内容和大小进行校验。
+- 支持凭证列表、预览、下载和删除。
+- 支持关联商品。
+- 通过当前登录用户身份控制凭证访问权限。
 
-    Service --> LLM[大模型服务]
-    LLM --> Extractor[信息提取 / 意图识别]
-    Extractor --> Schema[Pydantic 校验]
+### 2.6 任务中心与通知
 
-    Scheduler[APScheduler 定时任务] --> DB
-    Scheduler --> Notification[通知记录]
-    Notification --> API
+- 创建和管理个人任务。
+- 支持待处理、进行中、已完成和已取消状态。
+- 支持任务优先级、计划时间和提醒时间。
+- 支持任务搜索、筛选和分页。
+- 售后期限可联动生成系统任务。
+- 任务通知与售后通知统一展示。
+- 支持通知已读操作。
+
+### 2.7 AI 自然语言业务查询（开发中）
+
+计划通过 LangGraph 构建只读业务查询工作流，让用户使用自然语言查询商品、售后记录和任务。
+
+预期流程：
+
+```text
+用户自然语言问题
+    ↓
+LangGraph Agent
+    ↓
+识别查询意图
+    ↓
+选择受控业务工具
+    ↓
+Pydantic 参数校验
+    ↓
+Repository 查询
+    ↓
+返回结构化结果
+    ↓
+LLM 组织自然语言回答
 ```
 
-## 4. 技术栈
+安全设计：
+
+- LLM 不直接执行原始 SQL。
+- 查询工具只开放明确的业务操作。
+- `user_id` 由服务端当前登录用户上下文注入。
+- 查询参数通过 Schema 限制。
+- 复用现有 Repository，避免重复实现数据库查询逻辑。
+
+## 3. 技术栈
 
 | 模块 | 技术 |
 |---|---|
-| 后端 API | FastAPI |
+| 后端 API | Python、FastAPI |
 | 数据校验 | Pydantic |
 | ORM | SQLAlchemy |
 | 数据库 | PostgreSQL |
 | 数据库迁移 | Alembic |
+| 用户认证 | JWT |
+| 前端 | React、Vite |
+| AI 模型接入 | Qwen、DashScope 兼容接口 |
+| AI 应用框架 | LangChain、LangGraph |
+| AI 能力 | Prompt Engineering、结构化信息提取、Tool Calling、RAG 基础实践 |
 | 定时任务 | APScheduler |
-| 前端 | React + Vite |
-| AI 模型接入 | OpenAI SDK 兼容接口 |
-| AI 评测 | 自建 JSON 评测集与 Python 评测脚本 |
-| 日志追踪 | Trace ID、ContextVar、RotatingFileHandler |
+| 工程化 | Git、GitHub、Docker 基础实践 |
+
+## 4. 系统架构
+
+```mermaid
+flowchart TD
+    User[用户] --> Frontend[React + Vite]
+    Frontend --> API[FastAPI]
+    API --> Auth[JWT 身份认证]
+    API --> Service[业务 Service]
+    Service --> Repository[Repository]
+    Repository --> DB[(PostgreSQL)]
+
+    Service --> LLM[Qwen / DashScope]
+    LLM --> Extractor[意图识别与信息提取]
+    Extractor --> Schema[Pydantic 校验]
+    Schema --> Confirm[用户确认]
+    Confirm --> Service
+
+    API --> QueryGraph[LangGraph 查询工作流]
+    QueryGraph --> Tools[受控业务查询工具]
+    Tools --> Repository
+
+    Scheduler[APScheduler] --> Reminder[期限与任务提醒]
+    Reminder --> DB
+```
 
 ## 5. 工程化设计
 
-### 数据库迁移
+### 5.1 分层架构
+
+```text
+API Router
+    ↓
+Service
+    ↓
+Repository
+    ↓
+Database
+```
+
+- Router：处理 HTTP 请求、参数和依赖。
+- Service：组织业务逻辑。
+- Repository：负责数据库查询与写入。
+- Schema：定义请求校验和响应结构。
+- ORM Model：定义数据库表结构。
+
+### 5.2 用户数据隔离
+
+使用 JWT 识别当前登录用户，后端从认证上下文获取用户身份。
+
+业务查询和数据写入均需要结合当前用户身份进行权限控制，不能信任前端或 LLM 提供的用户 ID。
+
+### 5.3 数据库迁移
 
 使用 Alembic 管理数据库结构变更：
 
 ```text
 修改 ORM Model
-→ 生成 Alembic migration
-→ 审查迁移文件
-→ 执行 upgrade head
+    ↓
+生成 Migration
+    ↓
+审查迁移文件
+    ↓
+执行 upgrade head
 ```
 
-避免依赖 `create_all()` 在不同环境中自动建表。
+### 5.4 AI 输出安全
 
-### 提醒幂等性
-
-同一条售后记录在同一天不能生成重复提醒。
-
-数据库使用唯一约束：
+AI 信息提取采用：
 
 ```text
-record_id + deadline_type + deadline + remind_on
+模型输出
+    ↓
+JSON 解析
+    ↓
+Pydantic Schema 校验
+    ↓
+前端展示候选信息
+    ↓
+用户确认
+    ↓
+保存正式记录
 ```
 
-插入时使用 PostgreSQL 的冲突忽略机制，保证定时任务重复运行也不会重复提醒。
+### 5.5 文件安全
 
-### 事务处理
+购物凭证上传时检查：
 
-数据库写操作遵循：
+- 文件扩展名；
+- MIME 类型；
+- 文件实际内容特征；
+- 文件大小；
+- 保存文件名随机化；
+- 删除和访问时的存储路径校验；
+- 当前用户的数据访问权限。
 
-```text
-db.add()
-→ db.flush()
-→ db.commit()
-```
+### 5.6 日志与请求追踪
 
-出现异常时：
-
-```text
-db.rollback()
-→ raise
-```
-
-最终通过：
-
-```text
-db.close()
-```
-
-释放数据库连接。
-
-### AI 输出安全
-
-AI 提取结果不直接入库：
-
-```text
-模型输出 JSON
-→ JSON 解析
-→ Pydantic Schema 校验
-→ 前端候选信息确认
-→ 写入正式售后记录
-```
-
-对于缺失字段、日期歧义或模型输出格式异常，系统要求用户确认或重试。
-
-### AI 评测
-
-项目包含基础评测样本，覆盖：
-
-- 完整信息；
-- 缺失字段；
-- 数字与订单号干扰；
-- 日期歧义；
-- 防止字段幻觉；
-- 口语表达；
-- 提示注入。
-
-评测输出指标包括：
-
-```text
-样本通过率
-字段准确率
-missing_fields Precision
-missing_fields Recall
-missing_fields F1
-```
-
-### 请求链路追踪
-
-每个 HTTP 请求都会生成唯一 `trace_id`：
-
-```text
-HTTP 请求开始
-→ 写入 ContextVar
-→ AI 模型调用读取同一个 trace_id
-→ 记录模型耗时与输出长度
-→ HTTP 请求结束
-```
-
-通过 `trace_id` 可以关联接口请求日志与模型调用日志，便于排查性能与异常问题。
+通过 Trace ID 关联 HTTP 请求和模型调用日志，帮助定位接口异常、模型调用耗时和业务问题。
 
 ## 6. 项目目录
 
 ```text
-app/
-├── core/               # 配置、依赖注入、日志、请求上下文
-├── db/                 # ORM、Repository、数据库接口
-├── middleware/         # 请求日志中间件
-├── schemas/            # Pydantic 请求与响应模型
-├── services/           # AI 提取、意图识别、期限业务逻辑
-├── llm_client.py       # 大模型客户端封装
-├── reminder_scheduler.py
-└── chat_service.py
-
-alembic/                # 数据库迁移脚本
-evals/                  # AI 提取评测样本与实验记录
-scripts/                # AI 评测脚本
-frontend/               # React 前端
-logs/                   # 本地运行日志
+little-aftercare/
+├── app/
+│   ├── core/               # 配置、依赖、日志和请求上下文
+│   ├── db/                 # ORM、数据库与 Repository
+│   ├── schemas/            # Pydantic 请求与响应模型
+│   ├── services/           # 业务服务与 AI 处理逻辑
+│   ├── tools/              # Agent 可调用的业务工具
+│   ├── graphs/             # LangGraph 工作流
+│   ├── middleware/         # 请求中间件
+│   ├── chat_service.py     # 聊天与 AI 业务入口
+│   └── llm_client.py       # 大模型客户端
+├── frontend/
+│   ├── src/
+│   │   ├── api/            # 前端 API 模块
+│   │   ├── pages/          # 页面与认证上下文
+│   │   ├── styles/         # 页面级样式
+│   │   ├── App.jsx         # 应用主入口
+│   │   └── styles.css      # 全局设计系统
+│   └── package.json
+├── alembic/                # 数据库迁移
+├── evals/                  # AI 评测样本
+├── scripts/                # 辅助脚本
+├── logs/                   # 本地运行日志
+├── main.py                 # 后端启动入口
+└── README.md
 ```
 
-## 7. 本地启动
+## 7. 本地运行
 
-### 环境要求
+### 7.1 环境要求
 
-- Python 与项目虚拟环境；
-- Node.js 与 npm；
-- Docker Desktop / Docker Compose；
-- PostgreSQL；
-- 可用的大模型 API Key。
+- Python
+- Node.js 与 npm
+- PostgreSQL
+- Docker Desktop / Docker Compose（按项目数据库配置使用）
+- 可用的 DashScope API Key
 
-### 环境变量
+### 7.2 环境变量
 
-在项目根目录创建 `.env`：
+在项目根目录创建 `.env`，按项目当前配置填写：
 
 ```env
 DASHSCOPE_API_KEY=你的模型服务API密钥
 DASHSCOPE_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
-MODEL_NAME=你的聊天模型名称
-EMBEDDING_MODEL=你的向量模型名称
 
 POSTGRES_USER=aftercare_app
 POSTGRES_PASSWORD=本地数据库密码
@@ -241,13 +285,15 @@ POSTGRES_HOST=127.0.0.1
 POSTGRES_PORT=5433
 ```
 
-### 启动数据库
+模型名称及其他配置以 `app/core/config.py` 中的 Settings 定义为准。
+
+### 7.3 启动数据库
 
 ```powershell
 docker compose up -d
 ```
 
-### 启动后端
+### 7.4 启动后端
 
 ```powershell
 .venv\Scripts\activate
@@ -255,13 +301,13 @@ alembic upgrade head
 uvicorn main:app --reload
 ```
 
-接口文档：
+后端接口文档：
 
 ```text
 http://127.0.0.1:8000/docs
 ```
 
-### 启动前端
+### 7.5 启动前端
 
 ```powershell
 cd frontend
@@ -269,31 +315,38 @@ npm install
 npm run dev
 ```
 
-### 运行 AI 提取评测
+如需修改后端地址，可配置前端环境变量：
 
-```powershell
-.venv\Scripts\python scripts\evaluate_aftercare_extraction.py
+```env
+VITE_API_BASE_URL=http://127.0.0.1:8000
 ```
 
-### 查看日志
+## 8. 项目开发进度
 
-```powershell
-Get-Content .\logs\app.log -Tail 30 -Encoding UTF8
-```
+| 阶段 | 内容 | 状态 |
+|---|---|---|
+| P0 | 后端基础架构、数据库、认证、售后 CRUD、AI 提取确认闭环 | 已完成 |
+| P1 | 前端主界面、商品档案、购物凭证、任务中心、通知中心 | 基础功能已完成 |
+| P2 | LangGraph 自然语言查询、AI 商品与凭证识别、AI 售后管家 | 开发中 |
+| P3 | 自动化测试、部署、性能验证、项目文档和作品集打磨 | 待完善 |
 
-## 8. 后续计划
+### 当前重点
 
-- 完善统一错误响应和用户友好错误提示；
-- 为 AI 提取增加更多真实用户语料评测；
-- 接入订单截图 OCR，提取商品、日期和订单号；
-- 支持提醒延后、处理时间线与售后凭证附件；
-- 从临时 `session_id` 升级为真实用户认证；
-- 增加接口测试、前端组件拆分与持续集成。
+1. 完成 LangGraph 自然语言业务查询的真实接口闭环。
+2. 完善查询工具参数校验、用户隔离和异常处理。
+3. 开发 AI 商品与购物凭证识别。
+4. 开发 AI 售后管家 Agent。
+5. 补齐自动化测试和部署流程。
 
 ## 9. 项目亮点
 
-1. 不只是调用大模型：构建了“提取、校验、人工确认、正式入库”的安全链路。
-2. 不只看模型能不能回答：使用评测集、字段准确率、Precision、Recall、F1 衡量提取质量。
-3. 不只做 CRUD：实现了售后期限扫描、定时提醒与数据库幂等控制。
-4. 不只记录错误：通过 Trace ID 将 HTTP 请求、模型调用日志和错误定位关联起来。
-5. 以真实业务为导向：围绕购物售后这一明确场景设计数据模型、交互和 AI 能力。
+1. **真实业务闭环**：围绕商品、购物凭证、售后期限和任务提醒组织功能，而不是单纯的聊天页面。
+2. **AI 安全写入流程**：采用结构化提取、Schema 校验和人工确认，避免模型直接修改正式业务数据。
+3. **用户数据隔离**：使用 JWT 认证，并在服务端执行用户权限校验。
+4. **受控 Agent 工具调用**：自然语言查询通过业务工具访问数据库，不开放任意 SQL 执行能力。
+5. **工程化实践**：使用分层架构、Repository、Alembic、统一 API 请求处理和请求日志追踪。
+6. **前后端完整交互**：React 前端覆盖售后、商品、凭证、任务、通知和个人中心等业务页面。
+
+---
+
+> 项目仍在持续开发中。当前优先完善 AI 自然语言查询闭环，再推进商品凭证识别、售后管家 Agent 和部署测试。

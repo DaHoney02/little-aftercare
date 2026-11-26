@@ -189,7 +189,6 @@ export const aftercareApi = {
 
   /**
    * 截止日期总览
-   * SESSION_ID 参数暂时保留兼容旧调用，不再发送给后端。
    */
   overview: (_sessionId) =>
     request(
