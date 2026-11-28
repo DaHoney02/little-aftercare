@@ -1,7 +1,5 @@
 from typing import Literal
-
-from pydantic import BaseModel, Field, field_validator
-
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 # Literal--类型限制（输入约束）
 class Message(BaseModel):
@@ -34,6 +32,15 @@ class ChatRequest(BaseModel):
         description="聊天消息列表"
     )
 
+    @model_validator(mode="after")
+    def validate_messages(self):
+        """限制客户端智能提交user和assistant消息"""
+        if any(message.role=="system" for message in self.messages):
+            raise  ValueError("不允许客户端提交system消息")
+
+        if not any(message.role=="user" for message in self.messages):
+            raise ValueError("聊天请求中必须包含用户消息")
+        return self
 
 class ChatResponse(BaseModel):
     """聊天响应模型"""

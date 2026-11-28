@@ -151,83 +151,160 @@ class ChatService:
 
     def chat_stream(
             self,
-            messages:list[Message],
-            user_id:int,
-            session_id:str | None=None,
-    )->Iterator[str]:
-        """流式生成回答，并在回答完成后保存本轮对话"""
+            messages: list[Message],
+            user_id: int,
+            session_id: str | None = None,
+    ) -> Iterator[str]:
+        """
+        流式聊天。
 
+        处理顺序：
+        1. 读取历史消息并组合上下文。
+        2. 提取当前用户消息。
+        3. 优先处理售后业务和 LangGraph 自然语言查询。
+        4. 如果不是业务请求，再调用普通模型流式生成。
+        5. 正常完成后保存本轮对话。
+
+        注意：
+        LangGraph 查询当前采用同步 invoke，
+        因此业务查询结果会作为一个完整文本块返回；
+        普通聊天仍然保持逐块流式输出。
+        """
+
+        # 1. 输入校验
         if not messages:
             raise ValueError("聊天消息列表不能为空")
 
-        # 1、读取历史记录：API注入数据库时使用SQLite；否则保留内存存储行为
+        # 2. 读取历史消息
         if session_id:
             if self.db is not None:
-                history=list_chat_messages(
+                history = list_chat_messages(
                     db=self.db,
                     session_id=session_id,
-                    user_id=user_id
+                    user_id=user_id,
                 )
             else:
-                history=session_store.get_messages(session_id,user_id)
-            # 拼接历史消息和本轮消息，执行历史裁剪
-            full_messages=session_store.trim_messages(
-                history+messages
+                history = session_store.get_messages(
+                    session_id,
+                    user_id,
+                )
+
+            full_messages = session_store.trim_messages(
+                history + messages
             )
         else:
-            full_messages=messages
+            full_messages = messages
+
+        # 3. 提取当前请求中的最后一条用户消息
+        user_messages = [
+            message
+            for message in messages
+            if message.role == "user"
+        ]
+
+        if not user_messages:
+            raise ValueError("聊天请求中缺少用户消息")
+
+        user_text = user_messages[-1].content
 
         logger.info(
-            "开始处理流式聊天，消息数量=%s",
-            len(messages)
+            "开始处理流式聊天：user_id=%s, session_id=%s",
+            user_id,
+            session_id,
         )
 
-        #2.创建底层模型生成器，并准备收集完整回答
-        answer_parts:list[str]=[]
-        stream=self.llm_client.chat_stream(full_messages)
+        # 4. 优先处理业务意图
+        # 复用 chat() 中已经实现的售后业务和 LangGraph 查询分流。
+        business_answer = self._handle_aftercare_intent(
+            user_text=user_text,
+            user_id=user_id,
+            session_id=session_id,
+            messages=full_messages,
+        )
 
-        # 默认认为生成没有正常完成
-        completed=False
+        # 5. 如果是业务请求，直接返回业务处理结果
+        if business_answer is not None:
+            answer = business_answer.strip()
 
-        try:
-            for chunk in stream:
-                if chunk:
-                    answer_parts.append(chunk)  #加chunk保存
-                    yield  chunk  #立即将当前chunk交给调用方，无需等整个回答生成【流式输出核心】
-            completed=True
-        finally:
-            #4.无论正常结束、异常还是外部关闭，都尝试关闭底层模型流生层成器
-            close=getattr(stream,"close",None)
-            if callable(close):
-                close()
+            if not answer:
+                raise RuntimeError("业务处理未返回有效回答")
+            # 当前 LangGraph 使用 invoke，因此这里一次性返回完整结果。
+            yield answer
 
-        # 只有正常完成，且存有session_id，才保存本轮对话
-        if completed and session_id:
-            answer="".join(answer_parts).strip()
-
-            # 空回答不存入历史
-            if answer:
+            # 保存本轮对话
+            if session_id:
                 turn_messages = messages + [
-                    Message(role="assistant", content=answer)
+                    Message(
+                        role="assistant",
+                        content=answer,
+                    )
                 ]
 
                 if self.db is not None:
-                    #postgreSQL:批量保存本轮用户消息和AI消息
                     create_messages(
                         db=self.db,
                         session_id=session_id,
                         user_id=user_id,
-                        messages=turn_messages
+                        messages=turn_messages,
                     )
-
                 else:
                     session_store.save_messages(
                         session_id,
-                        full_messages+[Message(
-                            role="assistant",content=answer
-                        )]
+                        full_messages + [
+                            Message(
+                                role="assistant",
+                                content=answer,
+                            )
+                        ],
                     )
+            return
 
+        # 6. 普通聊天：继续使用原有模型流式生成
+        answer_parts: list[str] = []
+        stream = self.llm_client.chat_stream(full_messages)
+        completed = False
+
+        try:
+            for chunk in stream:
+                if chunk:
+                    answer_parts.append(chunk)
+                    yield chunk
+
+            completed = True
+        finally:
+            # 无论正常结束、异常还是外部关闭，都尝试关闭底层生成器。
+            close = getattr(stream, "close", None)
+            if callable(close):
+                close()
+
+        # 7. 只有正常完成才保存聊天记录
+        if completed and session_id:
+            answer = "".join(answer_parts).strip()
+
+            if answer:
+                turn_messages = messages + [
+                    Message(
+                        role="assistant",
+                        content=answer,
+                    )
+                ]
+                if self.db is not None:
+                    create_messages(
+                        db=self.db,
+                        session_id=session_id,
+                        user_id=user_id,
+                        messages=turn_messages,
+                    )
+                else:
+                    session_store.save_messages(
+                        session_id,
+                        full_messages + [
+                            Message(
+                                role="assistant",
+                                content=answer,
+                            )
+                        ],
+                    )
 
     # 二、售后意图分流与候选记录处理
     def _handle_aftercare_intent(

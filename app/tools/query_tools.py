@@ -1,6 +1,6 @@
+
 from datetime import date, datetime
 from decimal import Decimal
-from functools import partial
 
 from langchain_core.tools import StructuredTool
 from sqlalchemy.orm import Session
@@ -8,75 +8,122 @@ from sqlalchemy.orm import Session
 from app.db.aftercare.aftercare_respository import list_records
 from app.db.products.product_repository import list_products
 from app.db.tasks.task_repository import TaskRepository
-from app.schemas.query import ProductQueryArgs, AftercareQueryArgs, TaskQueryArgs
+from app.schemas.query import (
+    ProductQueryArgs,
+    AftercareQueryArgs,
+    TaskQueryArgs,
+)
 
-"""只读查询工具<执行>"""
+"""
+只读查询工具
+
+职责：
+1. 接收大模型生成并经过 Schema 校验的查询参数。
+2. 注入当前请求的数据库 Session 和用户身份。
+3. 调用对应 Repository 查询数据库。
+4. 将 ORM 对象序列化为适合大模型处理的字典。
+5. 通过 StructuredTool 暴露给 LangGraph。
+
+安全原则：
+db 和 user_id 由服务端注入，不允许大模型自行传递。
+所有查询必须限制在当前登录用户的数据范围内。
+"""
+
+# ============================================================
+# 一、商品查询工具
+# ============================================================
 
 def _query_products(
-        keyword:str | None,
-        category:str| None,
-        page:int,
-        page_size:int,
-        *,
-        db:Session,
-        user_id:int,
-)->dict:
+    keyword: str | None,
+    category: str | None,
+    page: int,
+    page_size: int,
+    *,
+    db: Session,
+    user_id: int,
+) -> dict:
     """
-    查询当前登录用户的商品档案
-    -接收通过校验的参数，注入用户身份和数据库Session,调用Repository
+    查询当前登录用户的商品档案。
+
+    接收经过校验的查询参数，
+    注入用户身份和数据库 Session，调用 Repository。
     """
 
-    products,total=list_products(
+    products, total = list_products(
         db=db,
         user_id=user_id,
         keyword=keyword,
         category=category,
         page=page,
-        page_size=page_size
+        page_size=page_size,
     )
-    items=[
+
+    # 将商品 ORM 对象转换为普通字典，
+    # 避免直接将 SQLAlchemy 对象交给大模型。
+    items = [
         {
-            "id":product.id,
-            "name":product.name,
-            "brand":product.brand,
-            "model":product.model,
-            "category":product.category,
-            "purchase_price":(
+            "id": product.id,
+            "name": product.name,
+            "brand": product.brand,
+            "model": product.model,
+            "category": product.category,
+            "purchase_price": (
                 str(product.purchase_price)
                 if product.purchase_price is not None
                 else None
             ),
-            "purchase_date":(
+            "purchase_date": (
                 product.purchase_date.isoformat()
                 if product.purchase_date
                 else None
             ),
-            "purchase_channel":product.purchase_channel
-        }for product in products
+            "purchase_channel": product.purchase_channel,
+        }
+        for product in products
     ]
+
     return {
-        "items":items,
-        "total":total,
-        "page":page,
-        "page_size":page_size,
+        "items": items,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
         "total_pages": (total + page_size - 1) // page_size,
     }
 
-def build_query_products_tool(
-        db:Session,
-        user_id:int,
-)->StructuredTool:
-    """创建绑定当前请求数据库和用户身份的商品查询工具"""
 
-    # partial:一种依赖注入方式，将db和user_id固定在服务端函数中
-    bound_func=partial(
-        _query_products,
-        db=db,
-        user_id=user_id
-    )
+def build_query_products_tool(
+    db: Session,
+    user_id: int,
+) -> StructuredTool:
+    """
+    创建绑定当前请求数据库和用户身份的商品查询工具。
+
+    使用内部普通函数包装原始查询函数，
+    通过闭包绑定 db 和 user_id。
+
+    这样 LangGraph 可以正常解析工具函数的类型注解，
+    避免 functools.partial 引起的 get_type_hints 异常。
+    """
+
+    def query_products(
+        keyword: str | None = None,
+        category: str | None = None,
+        page: int = 1,
+        page_size: int = 10,
+    ) -> dict:
+        """查询当前登录用户自己的商品档案。"""
+
+        return _query_products(
+            keyword=keyword,
+            category=category,
+            page=page,
+            page_size=page_size,
+            db=db,
+            user_id=user_id,
+        )
 
     return StructuredTool.from_function(
-        func=bound_func,
+        func=query_products,
         name="query_products",
         description=(
             "查询当前登录用户自己的商品档案。"
@@ -86,14 +133,25 @@ def build_query_products_tool(
         args_schema=ProductQueryArgs,
     )
 
+
+# ============================================================
+# 二、售后记录查询工具
+# ============================================================
+
 def _serialize_aftercare(record) -> dict:
-    """将售后 ORM 对象转换成适合交给大模型的字典。"""
+    """
+    将售后 ORM 对象转换成适合交给大模型的字典。
+    """
 
     def serialize_value(value):
+        """处理日期、时间和 Decimal 类型。"""
+
         if isinstance(value, (date, datetime)):
             return value.isoformat()
+
         if isinstance(value, Decimal):
             return str(value)
+
         return value
 
     return {
@@ -122,9 +180,12 @@ def _query_aftercare_records(
     page: int = 1,
     page_size: int = 10,
 ) -> dict:
-    """查询当前登录用户的售后记录。"""
+    """
+    查询当前登录用户的售后记录。
+    """
 
-    # Repository 使用 limit + offset，因此在工具层计算偏移量
+    # Repository 使用 limit + offset，
+    # 因此在工具层计算分页偏移量。
     offset = (page - 1) * page_size
 
     items, total = list_records(
@@ -139,6 +200,7 @@ def _query_aftercare_records(
         limit=page_size,
         offset=offset,
     )
+
     return {
         "items": [
             _serialize_aftercare(record)
@@ -155,16 +217,40 @@ def build_query_aftercare_tool(
     db: Session,
     user_id: int,
 ) -> StructuredTool:
-    """构建绑定当前数据库会话和用户身份的售后查询工具。"""
+    """
+    构建绑定当前数据库会话和用户身份的售后查询工具。
 
-    query_func = partial(
-        _query_aftercare_records,
-        db=db,
-        user_id=user_id,
-    )
+    使用闭包绑定数据库 Session 和用户 ID，
+    不将敏感参数暴露给大模型。
+    """
+
+    def query_aftercare_records(
+        keyword: str | None = None,
+        product_id: int | None = None,
+        status: str | None = None,
+        deadline_type: str | None = None,
+        sort_by: str = "created_at",
+        sort_order: str = "desc",
+        page: int = 1,
+        page_size: int = 10,
+    ) -> dict:
+        """查询当前登录用户的售后记录。"""
+
+        return _query_aftercare_records(
+            db=db,
+            user_id=user_id,
+            keyword=keyword,
+            product_id=product_id,
+            status=status,
+            deadline_type=deadline_type,
+            sort_by=sort_by,
+            sort_order=sort_order,
+            page=page,
+            page_size=page_size,
+        )
 
     return StructuredTool.from_function(
-        func=query_func,
+        func=query_aftercare_records,
         name="query_aftercare_records",
         description=(
             "查询当前登录用户的售后记录。"
@@ -174,13 +260,23 @@ def build_query_aftercare_tool(
         args_schema=AftercareQueryArgs,
     )
 
-def _serialize_task(task)->dict:
-    """将Task ORM对象转换为可交给LLM的字典格式"""
+
+# ============================================================
+# 三、任务查询工具
+# ============================================================
+
+def _serialize_task(task) -> dict:
+    """
+    将 Task ORM 对象转换为可交给 LLM 的字典格式。
+    """
+
     def serialize_value(value):
-        if isinstance(value,(date,datetime)):
+        """处理日期、时间和 Decimal 类型。"""
+
+        if isinstance(value, (date, datetime)):
             return value.isoformat()
 
-        if isinstance(value,Decimal):
+        if isinstance(value, Decimal):
             return str(value)
 
         return value
@@ -201,21 +297,25 @@ def _serialize_task(task)->dict:
         "created_at": serialize_value(task.created_at),
     }
 
-def _query_tasks(
-        *,
-        db:Session,
-        user_id:int,
-        page:int=1,
-        page_size:int=10,
-        status:str | None=None,
-        keyword:str|None=None,
-        source_type:str| None=None,
-        priority:str| None=None,
-)->dict:
-    """查询当前登录用户的任务"""
-    repository=TaskRepository(db)
 
-    items,total=repository.list_tasks(
+def _query_tasks(
+    *,
+    db: Session,
+    user_id: int,
+    page: int = 1,
+    page_size: int = 10,
+    status: str | None = None,
+    keyword: str | None = None,
+    source_type: str | None = None,
+    priority: str | None = None,
+) -> dict:
+    """
+    查询当前登录用户的任务。
+    """
+
+    repository = TaskRepository(db)
+
+    items, total = repository.list_tasks(
         user_id=user_id,
         page=page,
         page_size=page_size,
@@ -226,35 +326,54 @@ def _query_tasks(
     )
 
     return {
-        "items":[
+        "items": [
             _serialize_task(task)
             for task in items
         ],
-        "total":total,
-        "page":page,
-        "page_size":page_size,
-        "total_pages":(total+page_size-1)//page_size
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": (total + page_size - 1) // page_size,
     }
 
+
 def build_query_tasks_tool(
-        db:Session,
-        user_id:int
-)->StructuredTool:
-    """构建绑定当期那数据库会话和用户身份的任务查询工具"""
-    query_func=partial(
-        _query_tasks,
-        db=db,
-        user_id=user_id
-    )
-    return  StructuredTool.from_function(
-        func=query_func,
+    db: Session,
+    user_id: int,
+) -> StructuredTool:
+    """
+    构建绑定当前数据库会话和用户身份的任务查询工具。
+    """
+
+    def query_tasks(
+        page: int = 1,
+        page_size: int = 10,
+        status: str | None = None,
+        keyword: str | None = None,
+        source_type: str | None = None,
+        priority: str | None = None,
+    ) -> dict:
+        """查询当前登录用户的任务列表。"""
+
+        return _query_tasks(
+            db=db,
+            user_id=user_id,
+            page=page,
+            page_size=page_size,
+            status=status,
+            keyword=keyword,
+            source_type=source_type,
+            priority=priority,
+        )
+
+    return StructuredTool.from_function(
+        func=query_tasks,
         name="query_tasks",
         description=(
-             "查询当前登录用户的任务列表。"
+            "查询当前登录用户的任务列表。"
             "可按任务标题关键词、任务状态、任务来源和优先级筛选，"
             "支持分页。"
             "用户询问待办、已完成、正在处理或高优先级任务时使用。"
         ),
-        args_schema=TaskQueryArgs
+        args_schema=TaskQueryArgs,
     )
-

@@ -295,3 +295,24 @@ export const userApi = {
   changePassword: (data) =>
     sendJson('/auth/change-password', 'POST', data),
 }
+
+/* =========================
+   AI 助手 API
+========================= */
+
+export const chatApi = {
+  /**
+   * 发送聊天消息
+   *
+   * session_id 用于标识当前聊天会话：
+   * - 第一次聊天时创建
+   * - 后续消息继续使用同一个 session_id
+   *
+   * user_id 不由前端传递，由后端通过 JWT 获取当前用户。
+   */
+  send: (messages, sessionId) =>
+    sendJson('/chat', 'POST', {
+      messages,
+      session_id: sessionId,
+    }),
+}

@@ -417,29 +417,6 @@ input, textarea, select {
 }
 .nav-item:hover i { animation: badge-bounce .55s var(--ease-spring); background: #eaf3eb; }
 
-.sidebar-bottom {
-  margin-top: auto;
-  padding: 16px 13px;
-  border-radius: 14px;
-  background: #f4f7f2;
-  transition: background var(--transition-fast);
-}
-.sidebar-bottom:hover { background: #eef4ec; }
-.privacy-icon {
-  display: grid;
-  place-items: center;
-  width: 36px;
-  height: 36px;
-  margin-bottom: 12px;
-  border-radius: 11px;
-  background: #e2eee3;
-  color: var(--green);
-  font-size: 20px;
-  transition: transform var(--transition-soft);
-}
-.sidebar-bottom:hover .privacy-icon { transform: rotate(-6deg) scale(1.06); }
-.sidebar-bottom strong { font-size: 14px; }
-.sidebar-bottom p { margin: 8px 0 12px; color: #87928a; font-size: 13px; line-height: 1.7; }
 .session-tag { display: block; overflow: hidden; color: #a3aaa4; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 
 .main-content {

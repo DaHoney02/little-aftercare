@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     # 大模型配置
     DASHSCOPE_API_KEY:str
     DASHSCOPE_BASE_URL:str ="https://dashscope.aliyuncs.com/compatible-mode/v1"
-    MODEL_NAME:str="qwen3.8-flash"
+    MODEL_NAME:str="qwen4-max"
     EMBEDDING_MODEL:str="qwen3.7-text-embedding-flash"
 
     # PostgreSQL配置

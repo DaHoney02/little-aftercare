@@ -6,6 +6,7 @@ import ProfilePage from './pages/ProfilePage.jsx'
 import ProductsPage from './pages/ProductsPage.jsx'
 import ProductCredPage from './pages/ProductCredPage.jsx'
 import TaskCenter from './pages/TaskCenter.jsx'
+import AssistantDrawer from './components/assistant/AssistantDrawer.jsx'
 
 const PAGE_SIZE_OPTIONS = [5, 10, 20, 50]
 
@@ -105,6 +106,7 @@ function App() {
   const [aiText, setAiText] = useState('')
   const [candidate, setCandidate] = useState(null)
   const [activePage, setActivePage] = useState('overview')
+  const [assistantOpen,setAssistantOpen] = useState(false)
   // 工作台内部视图：总览与全部任务，共用一个导航入口。
   const [workspaceView, setWorkspaceView] = useState('overview')
   // 保存从售后期限提醒进入任务中心时，需要定位的系统任务标识
@@ -325,13 +327,14 @@ function App() {
 
   const pageTitle = ({
       overview: '工作台',
-       records: '我的记录',
-       products:'商品档案',
-       credentials:'购物凭证',
-        profile: '个人中心',
-         settings: '偏好设置' ,
+      chat:'AI助手',
+      records: '我的记录',
+      products:'商品档案',
+      credentials:'购物凭证',
+      profile: '个人中心',
+      settings: '偏好设置' ,
 
-         })[activePage] || '工作台'
+  })[activePage] || '工作台'
 
   // 手动刷新同时重置所有列表查询条件。
   const resetSearchAndRefresh = async () => {
@@ -652,6 +655,17 @@ function App() {
           <span className="nav-text">购物凭证</span>
         </button>
 
+        {/* 全局 AI 助手入口：打开抽屉，不切换业务页面 */}
+        <button
+          className="nav-item assistant-nav-item"
+          type="button"
+          onClick={() => setAssistantOpen(true)}
+          aria-label="打开 AI 助手"
+        >
+          <AppIcon name="sparkle" />
+          <span className="nav-text">AI 助手</span>
+        </button>
+
         <button
           className={`nav-item ${activePage === 'profile' ? 'active' : ''}`}
           onClick={() => setActivePage('profile')}
@@ -672,15 +686,6 @@ function App() {
           <span className="nav-text">偏好设置</span>
         </button>
       </nav>
-
-      <div className="sidebar-bottom">
-        <div className="privacy-icon">✳</div>
-        <strong>重要期限，心里有数</strong>
-        <p>把购物后的琐碎信息收好，给生活多一点从容。</p>
-        <span className="session-tag">
-          当前用户 · {user.username || '已登录'}
-        </span>
-      </div>
     </aside>
 
 
@@ -720,7 +725,7 @@ function App() {
             >
               <span className="workspace-tab-mark"><AppIcon name="layout" /></span>
               总览
-              <small>Overview</small>
+                <small>Overview</small>
             </button>
             <button
               type="button"
@@ -740,7 +745,7 @@ function App() {
             <div>
               <div className="eyebrow">PERSONAL AFTERCARE</div>
               <h1>把重要的小事，<em>放心交给我。</em></h1>
-              <p className="subtitle">购物之后的退换与保修期限，现在一目了然。</p>
+{/*                  <p className="subtitle">购物之后的退换与保修期限，现在一目了然。</p> */}
             </div>
             <button className="primary-button" onClick={openCreate} type="button"><AppIcon name="plus" size={17} /> 新增记录</button>
           </section>
@@ -1000,6 +1005,12 @@ function App() {
         onClose={() => setDetailRecord(null)}
         onEdit={() => { openEdit(detailRecord); setDetailRecord(null) }}
       />}
+
+      {/* 全局 AI 助手抽屉。放在 App 根级，保证切换业务页面时不会卸载。 */}
+      <AssistantDrawer
+        open={assistantOpen}
+        onClose={() => setAssistantOpen(false)}
+      />
     </div>
   )
 }
